@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Exercise 3 — Presets from REST API</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; line-height: 1.4; }
+    /* center the topbar (preset select line) */
+    #topbar { display: flex; gap: .75rem; align-items: center; justify-content: center; margin: .5rem auto 1rem; }
+  /* center buttons and allow wrapping */
+  #buttonsContainer { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; margin: 0 auto; }
+    .error { color: #b00020; }
+  </style>
+  <script src="js/main.js" type="module"></script>
+</head>
+
+<body>
+  <h1>Sampler</h1>
+
+  <div id="topbar">
+    <label for="presetSelect">Preset:</label>
+    <select id="presetSelect" disabled>
+      <option>Loading presets…</option>
+    </select>
+    <span id="status"></span>
+  </div>
+
+  <div id="buttonsContainer"></div>
+
+  <p class="error" id="error"></p>
+</body>
+</html>
