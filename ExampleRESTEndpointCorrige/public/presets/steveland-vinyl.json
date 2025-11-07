@@ -1,0 +1,23 @@
+{
+  "name": "Steveland Vinyl",
+  "type": "Drumkit",
+  "isFactoryPresets": true,
+  "samples": [
+    { "url": "./steveland-vinyl/Kick Steveland 1.wav", "name": "kick" },
+    { "url": "./steveland-vinyl/Snare Steveland 1.wav", "name": "snare1" },
+    { "url": "./steveland-vinyl/Snare Steveland 2.wav", "name": "snare2" },
+    { "url": "./steveland-vinyl/ClosedHH Steveland.wav", "name": "closed hihats" },
+    { "url": "./steveland-vinyl/OpenHH Steveland.wav", "name": "open hihats" },
+    { "url": "./steveland-vinyl/Tom Steveland 1.wav", "name": "tom1" },
+    { "url": "./steveland-vinyl/Tom Steveland 2.wav", "name": "tom2" },
+    { "url": "./steveland-vinyl/Tom Steveland 3.wav", "name": "tom3" },
+    { "url": "./steveland-vinyl/Tom Steveland 4.wav", "name": "tom4" },
+    { "url": "./steveland-vinyl/Conga Steveland 1.wav", "name": "conga" },
+    { "url": "./steveland-vinyl/Bass Steveland 1.wav", "name": "bass1" },
+    { "url": "./steveland-vinyl/Bass Steveland 2.wav", "name": "bass2" },
+    { "url": "./steveland-vinyl/Rhodes Steveland 1.wav", "name": "rhodes" },
+    { "url": "./steveland-vinyl/Scratch Steveland 1.wav", "name": "scratch1" },
+    { "url": "./steveland-vinyl/Scratch Steveland 2.wav", "name": "scratch2" },
+    { "url": "./steveland-vinyl/Scratch Steveland 3.wav", "name": "scratch3" }
+  ]
+}

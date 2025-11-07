@@ -1,0 +1,23 @@
+{
+  "name": "Hip-Hop",
+  "type": "Drumkit",
+  "isFactoryPresets": true,
+  "samples": [
+    { "url": "./hip-hop/Kick HipHop 1.wav", "name": "kick1" },
+    { "url": "./hip-hop/Kick HipHop 2.wav", "name": "kick2" },
+    { "url": "./hip-hop/Snare HipHop 1.wav", "name": "snare1" },
+    { "url": "./hip-hop/Snare HipHop 2.wav", "name": "snare2" },
+    { "url": "./hip-hop/ClosedHH HipHop 1.wav", "name": "closed hihats1" },
+    { "url": "./hip-hop/ClosedHH HipHop 2.wav", "name": "closed hihats2" },
+    { "url": "./hip-hop/Clap HipHop.wav", "name": "clap" },
+    { "url": "./hip-hop/Crash HipHop.wav", "name": "crash" },
+    { "url": "./hip-hop/RevCymbal HipHop.wav", "name": "reverse cymbal" },
+    { "url": "./hip-hop/Ride HipHop.wav", "name": "ride" },
+    { "url": "./hip-hop/Triangle HipHop.wav", "name": "triangle" },
+    { "url": "./hip-hop/Vibraslap HipHop.wav", "name": "vibraslap" },
+    { "url": "./hip-hop/Wood HipHop.wav", "name": "wood" },
+    { "url": "./hip-hop/Clave HipHop.wav", "name": "clave" },
+    { "url": "./hip-hop/Combo HipHop 1.wav", "name": "combo1" },
+    { "url": "./hip-hop/Combo HipHop 2.wav", "name": "combo2" }
+  ]
+}
