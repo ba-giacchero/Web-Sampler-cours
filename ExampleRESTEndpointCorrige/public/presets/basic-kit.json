@@ -1,0 +1,13 @@
+{
+  "name": "Basic Kit",
+  "type": "Drumkit",
+  "isFactoryPresets": true,
+  "samples": [
+    { "url": "./basic-kit/kick.wav", "name": "kick" },
+    { "url": "./basic-kit/snare.wav", "name": "snare" },
+    { "url": "./basic-kit/hihat.wav", "name": "hihat" },
+    { "url": "./basic-kit/tom1.wav", "name": "tom1" },
+    { "url": "./basic-kit/tom2.wav", "name": "tom2" },
+    { "url": "./basic-kit/tom3.wav", "name": "tom3" }
+  ]
+}

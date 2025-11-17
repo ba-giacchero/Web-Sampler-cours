@@ -1,0 +1,23 @@
+{
+  "name": "Electronic",
+  "type": "Drumkit",
+  "isFactoryPresets": true,
+  "samples": [
+    { "url": "./electronic/kick.wav", "name": "kick" },
+    { "url": "./electronic/snare.wav", "name": "snare" },
+    { "url": "./electronic/tom1.wav", "name": "tom1" },
+    { "url": "./electronic/tom2.wav", "name": "tom2" },
+    { "url": "./electronic/tom3.wav", "name": "tom3" },
+    { "url": "./electronic/tom4.wav", "name": "tom4" },
+    { "url": "./electronic/hihat1.wav", "name": "hihat1" },
+    { "url": "./electronic/hihat2.wav", "name": "hihat2" },
+    { "url": "./electronic/clap1.wav", "name": "clap1" },
+    { "url": "./electronic/clap2.wav", "name": "clap2" },
+    { "url": "./electronic/crash1.wav", "name": "crash1" },
+    { "url": "./electronic/crash2.wav", "name": "crash2" },
+    { "url": "./electronic/ride1.wav", "name": "ride1" },
+    { "url": "./electronic/ride2.wav", "name": "ride2" },
+    { "url": "./electronic/perc1.wav", "name": "perc1" },
+    { "url": "./electronic/perc2.wav", "name": "perc2" }
+  ]
+}
