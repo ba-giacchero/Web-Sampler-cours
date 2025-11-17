@@ -18,10 +18,17 @@
 
   <div id="topbar">
     <label for="presetSelect">Preset:</label>
-    <select id="presetSelect" disabled>
+    <select id="presetSelect" class="action-btn" disabled>
       <option>Loading presets…</option>
     </select>
     <span id="status"></span>
+  </div>
+
+  <div id="recorderBar" style="text-align:center; margin-bottom: .75rem;">
+    <label for="recordSlotSelect">Enregistrer sur slot:</label>
+    <select id="recordSlotSelect"></select>
+    <button id="recordBtn" class="action-btn" type="button">Enregistrer</button>
+    <span id="recordStatus" style="margin-left:.6rem;color:#b00020"></span>
   </div>
 
   <div id="buttonsContainer"></div>

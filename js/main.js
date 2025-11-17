@@ -4,6 +4,7 @@
 import { loadAndDecodeSound, playSound } from './soundutils.js';
 import TrimbarsDrawer from './trimbarsdrawer.js';
 import { pixelToSeconds } from './utils.js';
+import { saveRecording, listRecordings, getRecording, deleteRecording } from './indexeddb.js';
 
 // ====== CONFIG ORIGINS ======
 const API_BASE = 'http://localhost:3000';               // <- API + fichiers audio
@@ -43,6 +44,10 @@ let waveformCanvas, overlayCanvas, trimbarsDrawer;
 let mousePos = { x: 0, y: 0 };
 let currentShownBuffer = null;
 let currentShownUrl = null;
+// recording
+let mediaStream = null;
+let mediaRecorder = null;
+let recordedChunks = [];
 
 window.onload = async function init() {
   ctx = new AudioContext();
@@ -58,6 +63,8 @@ window.onload = async function init() {
 
     // 2) Remplit le <select>
     fillPresetSelect(presets);
+    // create a styled custom dropdown that replaces the native select's visible UI
+    createCustomPresetDropdown();
 
     // 3) Charge le premier preset par défaut
     presetSelect.disabled = false;
@@ -66,13 +73,96 @@ window.onload = async function init() {
   await loadPresetByIndex(0);
 
     // 4) Changement de preset
+    // keep native select change handler for programmatic changes
     presetSelect.addEventListener('change', async () => {
       const idx = Number(presetSelect.value);
+      // update custom UI label if present
+      const labelBtn = document.querySelector('.custom-select-btn .label');
+      if (labelBtn && presetSelect.options && presetSelect.options[idx]) labelBtn.textContent = presetSelect.options[idx].textContent;
       await loadPresetByIndex(idx);
     });
 
     // keyboard listener for triggering sounds via assigned keys
     window.addEventListener('keydown', onGlobalKeyDown);
+
+    // Recorder UI: populate slot select (1..16) and wire record button
+    const recordSlotSelect = document.getElementById('recordSlotSelect');
+    const recordBtn = document.getElementById('recordBtn');
+    const recordStatus = document.getElementById('recordStatus');
+    if (recordSlotSelect) {
+      for (let i = 1; i <= 16; i++) {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = String(i);
+        recordSlotSelect.appendChild(opt);
+      }
+    }
+
+    async function startRecordingForSlot(slotIndex) {
+      try {
+        if (!mediaStream) {
+          mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+      } catch (err) {
+        showError('Accès au micro refusé ou indisponible.');
+        return;
+      }
+
+      recordedChunks = [];
+      try {
+        mediaRecorder = new MediaRecorder(mediaStream);
+      } catch (err) {
+        showError('MediaRecorder non supporté par ce navigateur.');
+        return;
+      }
+
+      mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordedChunks.push(e.data); };
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(recordedChunks, { type: recordedChunks[0] ? recordedChunks[0].type : 'audio/webm' });
+        const defaultName = `mic-recording-${Date.now()}.webm`;
+        recordStatus.textContent = 'Sauvegarde en cours…';
+        try {
+          // save to IndexedDB
+          const id = await saveRecording(blob, defaultName);
+          recordStatus.textContent = 'Décodage et assignation…';
+
+          // create a File-like object from the blob so assignFileToSlot can reuse logic
+          const file = new File([blob], defaultName, { type: blob.type });
+          await assignFileToSlot(file, slotIndex);
+
+          recordStatus.textContent = `Assigné au slot ${slotIndex + 1} (id ${id})`;
+        } catch (err) {
+          console.error('Recording assign error', err);
+          showError('Erreur lors de la sauvegarde / assignation de l’enregistrement.');
+          recordStatus.textContent = '';
+        }
+        setTimeout(() => { if (recordStatus) recordStatus.textContent = ''; }, 2500);
+      };
+
+      mediaRecorder.start();
+      if (recordBtn) recordBtn.textContent = 'Stop';
+      if (recordStatus) recordStatus.textContent = 'Enregistrement…';
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+      if (recordBtn) recordBtn.textContent = 'Enregistrer';
+    }
+
+    if (recordBtn) {
+      recordBtn.addEventListener('click', async () => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          stopRecording();
+          return;
+        }
+        const slot = recordSlotSelect ? Number(recordSlotSelect.value) - 1 : 0;
+        if (typeof slot !== 'number' || isNaN(slot) || slot < 0 || slot > 15) {
+          showError('Choisis un numéro de slot valide (1–16)');
+          return;
+        }
+        await startRecordingForSlot(slot);
+      });
+    }
 
   } catch (err) {
     console.error(err);
@@ -86,6 +176,90 @@ async function fetchPresets(url) {
   const res = await fetch(url, { mode: 'cors' });
   if (!res.ok) throw new Error(`HTTP ${res.status} en récupérant ${url}`);
   return res.json();
+}
+
+// Build a custom dropdown to replace the visible behaviour of `#presetSelect` so
+// the opened menu can be styled like the other buttons.
+function createCustomPresetDropdown() {
+  if (!presetSelect) return;
+  // do nothing if wrapper already exists
+  if (document.querySelector('.custom-select-wrapper')) return;
+
+  // hide native select visually but keep it accessible for form/keyboard if needed
+  presetSelect.style.display = 'none';
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'custom-select-wrapper';
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'action-btn custom-select-btn';
+  const label = document.createElement('span');
+  label.className = 'label';
+  label.textContent = (presetSelect.options && presetSelect.options[0]) ? presetSelect.options[0].textContent : 'Select';
+  const caret = document.createElement('span');
+  caret.className = 'caret';
+  caret.textContent = '▾';
+  btn.appendChild(label);
+  btn.appendChild(caret);
+
+  wrapper.appendChild(btn);
+  // dropdown container (hidden by default) — append to body so it can overlay everything
+  const dropdown = document.createElement('div');
+  dropdown.id = 'presetDropdown';
+  dropdown.style.display = 'none';
+  dropdown.style.position = 'absolute';
+  dropdown.style.zIndex = '9999';
+  document.body.appendChild(dropdown);
+
+  // populate list from native select options
+  function populateList() {
+    dropdown.innerHTML = '';
+    if (!presetSelect.options) return;
+    Array.from(presetSelect.options).forEach((opt, i) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'action-btn preset-item';
+      item.textContent = opt.textContent;
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // set native select value and trigger change to reuse existing logic
+        presetSelect.value = String(i);
+        presetSelect.dispatchEvent(new Event('change'));
+        dropdown.style.display = 'none';
+      });
+      dropdown.appendChild(item);
+    });
+  }
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (dropdown.style.display === 'none') {
+      populateList();
+      // position dropdown relative to button coordinates so it overlays other UI
+      const rect = btn.getBoundingClientRect();
+      const left = Math.max(6, rect.left + window.scrollX);
+      const top = rect.bottom + window.scrollY + 8; // open downward
+      dropdown.style.left = `${left}px`;
+      dropdown.style.top = `${top}px`;
+      // ensure dropdown at least as wide as the button
+      dropdown.style.minWidth = `${Math.max(rect.width, 200)}px`;
+      dropdown.style.display = '';
+      // hide on scroll to avoid misposition
+      window.addEventListener('scroll', onWindowScroll, true);
+    } else {
+      dropdown.style.display = 'none';
+      window.removeEventListener('scroll', onWindowScroll, true);
+    }
+  });
+
+  // close dropdown on outside click
+  document.addEventListener('click', (ev) => { if (!wrapper.contains(ev.target) && !dropdown.contains(ev.target)) { dropdown.style.display = 'none'; window.removeEventListener('scroll', onWindowScroll, true); } });
+
+  function onWindowScroll() { dropdown.style.display = 'none'; window.removeEventListener('scroll', onWindowScroll, true); }
+
+  // insert wrapper before native select
+  presetSelect.parentElement.insertBefore(wrapper, presetSelect);
 }
 
 /**
@@ -522,17 +696,31 @@ function enableFilePickerOnButton(btn, slotIndex) {
   // This prevents accidental picker opening when the user double-clicks to play.
   let assign = btn.querySelector('.assign-icon');
   if (!assign) {
-    assign = document.createElement('button');
-    assign.type = 'button';
+    // use a non-button element to avoid nesting interactive controls inside a <button>
+    assign = document.createElement('span');
     assign.className = 'assign-icon';
     assign.title = 'Assign local file';
     assign.textContent = '+';
+    assign.tabIndex = 0; // make focusable for keyboard
+    assign.style.cursor = 'pointer';
+    assign.style.userSelect = 'none';
     btn.appendChild(assign);
   }
   assign.onclick = (e) => {
     e.stopPropagation();
-    pickFileForSlot(slotIndex);
+    // show chooser to pick a local file or select from saved recordings
+    showRecordingsChooser(slotIndex, assign);
   };
+  // prevent parent button from receiving mouse events originating on the assign icon
+  assign.addEventListener('mousedown', (e) => { e.stopPropagation(); });
+  assign.addEventListener('mouseup', (e) => { e.stopPropagation(); });
+  // support keyboard activation (Enter / Space)
+  assign.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      assign.click();
+    }
+  });
 }
 
 function pickFileForSlot(slotIndex) {
@@ -543,4 +731,149 @@ function pickFileForSlot(slotIndex) {
     filePicker.onchange = null;
   };
   filePicker.click();
+}
+
+// Show a small chooser UI near the assign button to pick a saved recording or local file
+async function showRecordingsChooser(slotIndex, anchorEl) {
+  // remove any existing chooser
+  const existing = document.getElementById('recordingsChooser');
+  if (existing) existing.remove();
+
+  const container = document.createElement('div');
+  container.id = 'recordingsChooser';
+  container.style.position = 'absolute';
+  container.style.zIndex = 9999;
+  // visual styles (background, border, shadow, padding) are controlled by CSS
+  container.style.padding = '8px';
+  container.style.maxHeight = '220px';
+  container.style.overflow = 'auto';
+
+  // position near anchor
+  const rect = anchorEl.getBoundingClientRect();
+  container.style.left = `${rect.right + window.scrollX + 6}px`;
+  container.style.top = `${rect.top + window.scrollY}px`;
+
+  const title = document.createElement('div');
+  title.textContent = 'Choisir une source';
+  title.style.fontWeight = '600';
+  title.style.marginBottom = '6px';
+  container.appendChild(title);
+
+  // two-button menu: local file OR saved recordings
+  const btnRow = document.createElement('div');
+  btnRow.style.display = 'flex';
+  btnRow.style.gap = '6px';
+  btnRow.style.marginBottom = '8px';
+
+  const localBtn = document.createElement('button');
+  localBtn.type = 'button';
+  localBtn.textContent = 'Fichier local…';
+  localBtn.className = 'action-btn';
+  localBtn.onclick = () => { pickFileForSlot(slotIndex); container.remove(); };
+  btnRow.appendChild(localBtn);
+
+  const savedBtn = document.createElement('button');
+  savedBtn.type = 'button';
+  savedBtn.textContent = 'Enregistrements…';
+  savedBtn.className = 'action-btn';
+  btnRow.appendChild(savedBtn);
+
+  container.appendChild(btnRow);
+
+  // list area (populated only when user clicks "Enregistrements…")
+  const list = document.createElement('div');
+  list.style.display = 'block';
+  list.style.fontSize = '13px';
+  list.style.minWidth = '220px';
+  container.appendChild(list);
+
+  async function populateRecordings() {
+    list.innerHTML = '';
+    try {
+      const recs = await listRecordings();
+      if (!recs || recs.length === 0) {
+        const p = document.createElement('div');
+        p.textContent = 'Aucun enregistrement trouvé.';
+        p.style.color = '#666';
+        list.appendChild(p);
+        return;
+      }
+      recs.sort((a,b) => b.created - a.created);
+      recs.forEach(r => {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        row.style.alignItems = 'center';
+        row.style.marginBottom = '6px';
+
+        const label = document.createElement('div');
+        label.textContent = r.name || `rec-${r.id}`;
+        label.title = new Date(r.created).toLocaleString();
+        label.style.flex = '1';
+        label.style.marginRight = '8px';
+        row.appendChild(label);
+
+        const useBtn = document.createElement('button');
+        useBtn.type = 'button';
+        useBtn.textContent = 'Use';
+        useBtn.className = 'action-btn';
+        useBtn.onclick = async (e) => {
+          e.stopPropagation();
+          const ent = await getRecording(r.id);
+          if (!ent || !ent.blob) { showError('Impossible de récupérer l’enregistrement.'); return; }
+          const file = new File([ent.blob], ent.name || `rec-${r.id}`, { type: ent.type || 'audio/webm' });
+          await assignFileToSlot(file, slotIndex);
+          container.remove();
+        };
+        row.appendChild(useBtn);
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.textContent = 'Delete';
+        delBtn.style.marginLeft = '6px';
+        delBtn.className = 'action-btn';
+        delBtn.onclick = async (ev) => {
+          ev.stopPropagation();
+          if (!confirm(`Supprimer ${r.name || r.id} ?`)) return;
+          await deleteRecording(r.id);
+          row.remove();
+        };
+        row.appendChild(delBtn);
+
+        list.appendChild(row);
+      });
+    } catch (err) {
+      const p = document.createElement('div');
+      p.textContent = 'Erreur en accédant aux enregistrements.';
+      p.style.color = 'red';
+      list.appendChild(p);
+      console.error('showRecordingsChooser error', err);
+    }
+  }
+
+  savedBtn.onclick = () => populateRecordings();
+
+  // close on outside click
+  function onDocClick(e) {
+    if (!container.contains(e.target)) container.remove();
+  }
+  setTimeout(() => document.addEventListener('click', onDocClick), 10);
+
+  document.body.appendChild(container);
+
+  // ensure chooser fits in viewport: if it overflows right, position it to the left of anchor
+  requestAnimationFrame(() => {
+    const cRect = container.getBoundingClientRect();
+    const winW = window.innerWidth;
+    if (cRect.right > winW) {
+      const newLeft = Math.max(6, rect.left + window.scrollX - cRect.width - 6);
+      container.style.left = `${newLeft}px`;
+    }
+    // if bottom overflows, clamp vertically
+    const winH = window.innerHeight;
+    if (cRect.bottom > winH) {
+      const newTop = Math.max(6, rect.bottom + window.scrollY - cRect.height);
+      container.style.top = `${newTop}px`;
+    }
+  });
 }

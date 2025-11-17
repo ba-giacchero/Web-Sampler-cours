@@ -182,6 +182,56 @@ h1 {
   box-shadow: 0 4px 8px rgba(16,24,40,0.06);
 }
 
+/* Generic action button style (for UI buttons outside the sound grid) */
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem 0.6rem;
+  margin: 0.15rem;
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(180deg, #ffffff, #f1f5f9);
+  color: #0b2a3a;
+  font-weight: 600;
+  font-size: 0.86rem;
+  cursor: pointer;
+  border-radius: 8px;
+  box-shadow: 0 2px 3px rgba(16,24,40,0.04);
+  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+.action-btn:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(16,24,40,0.08); background: linear-gradient(180deg,#ffffff,#eef2ff); }
+.action-btn:active { transform: translateY(0); box-shadow: 0 4px 8px rgba(16,24,40,0.06); }
+
+/* Style the record slot select to visually match action buttons */
+#recordSlotSelect {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(180deg,#ffffff,#f1f5f9);
+  box-shadow: 0 2px 3px rgba(16,24,40,0.04);
+  font-weight: 600;
+  color: #0b2a3a;
+}
+
+/* Recordings chooser container styling to match action buttons */
+#recordingsChooser {
+  border-radius: 10px;
+  /* same border/background as .action-btn / grid buttons */
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(180deg, #ffffff, #f1f5f9);
+  box-shadow: 0 2px 3px rgba(16,24,40,0.04);
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+#recordingsChooser .action-btn { font-size: 0.82rem; padding: 0.32rem 0.5rem; }
+
+/* make the Use / Del buttons less prominent but still styled */
+#recordingsChooser button { min-width: 44px; }
+
 /* Page background: light pastel gradient with subtle highlights */
 body {
   background-color: #f7fafc; /* fallback light */
@@ -209,3 +259,28 @@ html::before {
   background: radial-gradient(60% 60% at 50% 50%, rgba(255,255,255,0) 40%, rgba(0,0,0,0.04) 100%);
   z-index: 0;
 }
+
+/* Also style the preset select similarly */
+#presetSelect {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(180deg,#ffffff,#f1f5f9);
+  box-shadow: 0 2px 3px rgba(16,24,40,0.04);
+  font-weight: 600;
+  color: #0b2a3a;
+}
+
+/* Custom preset dropdown (when opened) */
+.custom-select-wrapper { position: relative; display: inline-block; }
+.custom-select-btn { display: inline-flex; align-items: center; gap: 8px; }
+.custom-select-btn .caret { font-size: 0.8rem; opacity: 0.8; }
+/* position dropdown above other UI (bottom of wrapper) and ensure it's on top */
+#presetDropdown { position: absolute; left: 0; top: calc(100% + 8px); z-index: 2000; min-width: 200px; }
+/* preset items: continuous list with no gaps; rounded corners only on first/last */
+#presetDropdown .preset-item { display: flex; align-items: center; justify-content: flex-start; width: 100%; margin: 0; border-radius: 0; padding: 0.38rem 0.6rem; }
+#presetDropdown .preset-item + .preset-item { border-top: 1px solid rgba(11,42,58,0.04); }
+#presetDropdown .preset-item:first-child { border-top-left-radius: 8px; border-top-right-radius: 8px; }
+#presetDropdown .preset-item:last-child { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
