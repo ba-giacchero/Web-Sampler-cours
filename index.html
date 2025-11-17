@@ -8,8 +8,6 @@
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; line-height: 1.4; }
     /* center the topbar (preset select line) */
     #topbar { display: flex; gap: .75rem; align-items: center; justify-content: center; margin: .5rem auto 1rem; }
-  /* center buttons and allow wrapping */
-  #buttonsContainer { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; margin: 0 auto; }
     .error { color: #b00020; }
   </style>
   <script src="js/main.js" type="module"></script>
@@ -29,5 +27,7 @@
   <div id="buttonsContainer"></div>
 
   <p class="error" id="error"></p>
+  <!-- hidden file input used to import a local audio file for a slot -->
+  <input id="filePicker" type="file" accept="audio/*" style="display:none" />
 </body>
 </html>
