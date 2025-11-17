@@ -1,0 +1,23 @@
+{
+  "name": "808",
+  "type": "Drumkit",
+  "isFactoryPresets": true,
+  "samples": [
+    { "url": "./808/Kick 808X.wav", "name": "kick" },
+    { "url": "./808/Snare 808 1.wav", "name": "snare1" },
+    { "url": "./808/Snare 808X.wav", "name": "snare2" },
+    { "url": "./808/HiTom 808.wav", "name": "tom1" },
+    { "url": "./808/MidTom 808.wav", "name": "tom2" },
+    { "url": "./808/LowTom 808.wav", "name": "tom3" },
+    { "url": "./808/ClosedHH 808.wav", "name": "closed hihats" },
+    { "url": "./808/OpenHH 808 1.wav", "name": "open hihats1" },
+    { "url": "./808/OpenHH 808 2.wav", "name": "open hihats2" },
+    { "url": "./808/Clap 808.wav", "name": "clap1" },
+    { "url": "./808/Clap 808X.wav", "name": "clap2" },
+    { "url": "./808/Rimshot 808.wav", "name": "rimshot" },
+    { "url": "./808/Cymbal 808X.wav", "name": "cymbal" },
+    { "url": "./808/Clave 808.wav", "name": "clave" },
+    { "url": "./808/Maracas 808.wav", "name": "maracas" },
+    { "url": "./808/Cowbell 808.wav", "name": "cowbell" }
+  ]
+}
