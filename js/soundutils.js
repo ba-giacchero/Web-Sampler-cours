@@ -36,6 +36,11 @@ async function loadAndDecodeSound(url, ctx) {
     // It is the case also with OscillatorNode nodes
     let bufferSource = buildAudioGraph(ctx, buffer);
 
+    // default playbackRate = 1 (normal pitch)
+    if (typeof arguments[4] !== 'undefined') {
+      try { bufferSource.playbackRate.value = arguments[4]; } catch (err) { /* ignore if unsupported */ }
+    }
+
     // First parameter = when to start (0 = now), if > 0 then the sound will be delayed
     // Second parameter = where to start in the sound (in seconds)
     // Third parameter = where to stop in the sound (in seconds)
