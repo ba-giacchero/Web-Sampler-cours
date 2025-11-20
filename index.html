@@ -26,15 +26,13 @@
 
   <div id="recorderBar" style="display:flex; gap:.75rem; align-items:center; justify-content:center; margin-bottom: .75rem;">
     <button id="addPresetBtn" class="action-btn" type="button">Ajouter un preset</button>
-    <label for="recordSlotSelect">Enregistrer sur slot:</label>
-    <select id="recordSlotSelect"></select>
-    <button id="recordBtn" class="action-btn" type="button">Enregistrer</button>
+    <button id="recordBtn" class="action-btn" type="button">Enregistrer avec le micro</button>
     <span id="recordStatus" style="margin-left:.6rem;color:#b00020"></span>
   </div>
 
 
   <div id="lastRecordingContainer" style="text-align:center; margin-bottom: .75rem;">
-    <div style="font-weight:600; margin-bottom:6px;">Dernier enregistrement</div>
+    <div id="lastRecordingLabel" style="font-weight:600; margin-bottom:6px;">Dernier enregistrement</div>
     <canvas id="lastRecordingCanvas" width="600" height="80" style="max-width:100%; height:80px; border-radius:8px;"></canvas>
   </div>
 

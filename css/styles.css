@@ -202,18 +202,7 @@ h1 {
 .action-btn:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(16,24,40,0.08); background: linear-gradient(180deg,#ffffff,#eef2ff); }
 .action-btn:active { transform: translateY(0); box-shadow: 0 4px 8px rgba(16,24,40,0.06); }
 
-/* Style the record slot select to visually match action buttons */
-#recordSlotSelect {
-  appearance: none;
-  -webkit-appearance: none;
-  padding: 0.35rem 0.6rem;
-  border-radius: 8px;
-  border: 1px solid #cbd5e1;
-  background: linear-gradient(180deg,#ffffff,#f1f5f9);
-  box-shadow: 0 2px 3px rgba(16,24,40,0.04);
-  font-weight: 600;
-  color: #0b2a3a;
-}
+/* record slot select removed — styles omitted */
 
 /* Recordings chooser container styling to match action buttons */
 #recordingsChooser {

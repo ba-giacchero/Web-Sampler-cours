@@ -5,6 +5,9 @@ import { loadAndDecodeSound, playSound } from './soundutils.js';
 import TrimbarsDrawer from './trimbarsdrawer.js';
 import { pixelToSeconds } from './utils.js';
 import { saveRecording, listRecordings, getRecording, deleteRecording } from './indexeddb.js';
+import { mkBtn, mkEl, placePopupNear, makeListRow } from './ui-helpers.js';
+import { drawWaveform, drawMiniWaveform } from './waveforms.js';
+import { showRecordingsChooser, showLocalSoundsChooser } from './choosers.js';
 
 // ====== CONFIG ORIGINS ======
 const API_BASE = 'http://localhost:3000';               // <- API + fichiers audio
@@ -56,6 +59,11 @@ let recordedChunks = [];
 window.onload = async function init() {
   ctx = new AudioContext();
 
+  // expose a simple playSound helper globally so choosers can preview sounds
+  window.playSound = (buffer) => {
+    try { playSound(ctx, buffer, 0, buffer.duration); } catch (err) { console.warn('global playSound error', err); }
+  };
+
   try {
     // 1) Récupère les presets du serveur
     const raw = await fetchPresets(PRESETS_URL);
@@ -78,6 +86,8 @@ window.onload = async function init() {
     presetSelect.disabled = false;
   // create waveform UI (hidden until a sound is selected)
   createWaveformUI();
+  // create persistent recording actions UI (visible from start)
+  createPersistentRecordingActions();
   await loadPresetByIndex(0);
 
     // 4) Changement de preset
@@ -93,19 +103,9 @@ window.onload = async function init() {
     // keyboard listener for triggering sounds via assigned keys
     window.addEventListener('keydown', onGlobalKeyDown);
 
-    // Recorder UI: populate slot select (1..16) and wire record button
-    const recordSlotSelect = document.getElementById('recordSlotSelect');
+    // Recorder UI: wire record button and status
     const recordBtn = document.getElementById('recordBtn');
     const recordStatus = document.getElementById('recordStatus');
-    
-    if (recordSlotSelect) {
-      for (let i = 1; i <= 16; i++) {
-        const opt = document.createElement('option');
-        opt.value = String(i);
-        opt.textContent = String(i);
-        recordSlotSelect.appendChild(opt);
-      }
-    }
 
     async function startRecordingForSlot(slotIndex) {
       try {
@@ -129,29 +129,39 @@ window.onload = async function init() {
       mediaRecorder.onstop = async () => {
         const blob = new Blob(recordedChunks, { type: recordedChunks[0] ? recordedChunks[0].type : 'audio/webm' });
         const defaultName = `mic-recording-${Date.now()}.webm`;
-        recordStatus.textContent = 'Sauvegarde en cours…';
+        recordStatus.textContent = 'Décodage…';
+
+        // create a File-like object for reuse
+        const file = new File([blob], defaultName, { type: blob.type });
+
+        // Draw mini preview
         try {
-          // save to IndexedDB
-          const id = await saveRecording(blob, defaultName);
-          recordStatus.textContent = 'Décodage et assignation…';
-
-          // create a File-like object from the blob so assignFileToSlot can reuse logic
-          const file = new File([blob], defaultName, { type: blob.type });
-          // decode for mini-preview (draw last recorded waveform)
-          try {
-            const previewBuffer = await decodeFileToBuffer(file);
-            if (lastRecordingCanvas && previewBuffer) drawMiniWaveform(previewBuffer, lastRecordingCanvas);
-          } catch (err) {
-            console.warn('Unable to decode preview buffer', err);
-          }
-          await assignFileToSlot(file, slotIndex);
-
-          recordStatus.textContent = `Assigné au slot ${slotIndex + 1} (id ${id})`;
+          const previewBuffer = await decodeFileToBuffer(file);
+          if (lastRecordingCanvas && previewBuffer) drawMiniWaveform(previewBuffer, lastRecordingCanvas);
         } catch (err) {
-          console.error('Recording assign error', err);
-          showError('Erreur lors de la sauvegarde / assignation de l’enregistrement.');
+          console.warn('Unable to decode preview buffer', err);
+        }
+
+        // Decode full buffer and display it in the waveform rectangle
+        try {
+          const buffer = await decodeFileToBuffer(file);
+          // show only on the top preview canvas (do NOT draw on the bottom waveform canvas)
+          const labelEl = document.getElementById('lastRecordingLabel');
+          if (labelEl) labelEl.textContent = 'Son chargé/enregistré';
+          try {
+            // draw a mini/full preview on the top canvas
+            if (lastRecordingCanvas) drawMiniWaveform(buffer, lastRecordingCanvas);
+          } catch (err) { console.warn('Unable to draw preview on top canvas', err); }
+          // show action toolbar attached to the top preview canvas (so bottom trimbars remain untouched)
+          const topParent = lastRecordingCanvas && lastRecordingCanvas.parentElement ? lastRecordingCanvas.parentElement : waveformCanvas.parentElement;
+          showRecordingActions(topParent, { buffer, file, blob, name: defaultName });
+          recordStatus.textContent = 'Enregistrement prêt';
+        } catch (err) {
+          console.error('Unable to decode recorded file', err);
+          showError('Impossible de décoder l’enregistrement.');
           recordStatus.textContent = '';
         }
+
         setTimeout(() => { if (recordStatus) recordStatus.textContent = ''; }, 2500);
       };
 
@@ -162,22 +172,19 @@ window.onload = async function init() {
 
     function stopRecording() {
       if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
-      if (recordBtn) recordBtn.textContent = 'Enregistrer';
+      if (recordBtn) recordBtn.textContent = 'Enregistrer avec le micro';
     }
 
     if (recordBtn) {
-      recordBtn.addEventListener('click', async () => {
-        if (mediaRecorder && mediaRecorder.state === 'recording') {
-          stopRecording();
-          return;
-        }
-        const slot = recordSlotSelect ? Number(recordSlotSelect.value) - 1 : 0;
-        if (typeof slot !== 'number' || isNaN(slot) || slot < 0 || slot > 15) {
-          showError('Choisis un numéro de slot valide (1–16)');
-          return;
-        }
-        await startRecordingForSlot(slot);
-      });
+      recordBtn.onclick = async () => {
+        try {
+          if (mediaRecorder && mediaRecorder.state === 'recording') {
+            stopRecording();
+            return;
+          }
+          await startRecordingForSlot();
+        } catch (err) { console.error('recordBtn click error', err); }
+      };
     }
 
   } catch (err) {
@@ -192,6 +199,139 @@ async function fetchPresets(url) {
   const res = await fetch(url, { mode: 'cors' });
   if (!res.ok) throw new Error(`HTTP ${res.status} en récupérant ${url}`);
   return res.json();
+}
+
+// create persistent actions UI under #lastRecordingContainer so buttons are visible from start
+function createPersistentRecordingActions() {
+  const container = document.getElementById('lastRecordingContainer');
+  if (!container) return;
+  // ensure position relative for absolute left play
+  if (!container.style.position) container.style.position = 'relative';
+
+  // left play button
+  const playLeft = document.createElement('button');
+  playLeft.id = 'persistentRecordingPlayLeft';
+  playLeft.type = 'button';
+  playLeft.className = 'action-btn';
+  playLeft.textContent = 'Play';
+  playLeft.style.position = 'absolute';
+  playLeft.style.left = '-56px';
+  playLeft.style.top = '50%';
+  playLeft.style.transform = 'translateY(-50%)';
+  playLeft.style.zIndex = '10002';
+  playLeft.disabled = true;
+  // click handler: play whatever is currently stored in actions._info (if available)
+  playLeft.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    try {
+      const actions = document.getElementById('persistentRecordingActions');
+      const info = actions && actions._info ? actions._info : null;
+      if (!info) return;
+      if (ctx && ctx.state === 'suspended') await ctx.resume();
+      let buffer = info.buffer;
+      // try to obtain buffer from file/blob/recId if needed
+      if (!buffer) {
+        // attempt from file
+        const f = info.file || (info.blob ? new File([info.blob], info.name || 'rec.webm', { type: info.blob.type || 'audio/webm' }) : null);
+        if (f) {
+          try { buffer = await decodeFileToBuffer(f); info.buffer = buffer; } catch (err) { console.warn('decode file for left play failed', err); }
+        } else if (info.recId && typeof getRecording === 'function') {
+          try {
+            const ent = await getRecording(info.recId);
+            if (ent && ent.blob) {
+              const file2 = new File([ent.blob], ent.name || info.name || 'rec.webm', { type: ent.type || 'audio/webm' });
+              buffer = await decodeFileToBuffer(file2);
+              info.buffer = buffer;
+            }
+          } catch (err) { console.warn('getRecording for left play failed', err); }
+        }
+      }
+      if (buffer) {
+        // play full buffer from 0 to duration
+        playSound(ctx, buffer, 0, buffer.duration);
+      }
+    } catch (err) { console.error('persistent left play error', err); }
+  });
+  container.appendChild(playLeft);
+
+  // action row positioned to the right of the canvas
+  const actions = document.createElement('div');
+  actions.id = 'persistentRecordingActions';
+  actions.style.position = 'absolute';
+  actions.style.left = `${container.clientWidth + 8}px`;
+  actions.style.top = '0px';
+  actions.style.zIndex = '10001';
+  actions.style.display = 'flex';
+  actions.style.flexDirection = 'column';
+  actions.style.gap = '8px';
+
+  // Ajouter au sampler
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button'; addBtn.className = 'action-btn'; addBtn.textContent = 'Ajouter au sampler'; addBtn.disabled = true;
+  addBtn.addEventListener('click', async () => {
+    const info = actions._info || {};
+    const s = prompt('Numéro du slot (1–16) pour assigner ce son:', '1');
+    if (!s) return; const n = Number(s); if (!n || isNaN(n) || n < 1 || n > 16) { alert('Numéro invalide'); return; }
+    try {
+      if (info.file) { await assignFileToSlot(info.file, n - 1); showStatus(`Assigné au slot ${n}`); }
+      else if (info.blob) { const f = new File([info.blob], info.name || `rec-${Date.now()}.webm`, { type: info.blob.type || 'audio/webm' }); await assignFileToSlot(f, n - 1); showStatus(`Assigné au slot ${n}`); }
+      else if (info.buffer && typeof assignBufferToSlot === 'function') { await assignBufferToSlot(info.buffer, info.name || 'sound', n - 1); showStatus(`Assigné au slot ${n}`); }
+      else { alert('Aucun son disponible à assigner'); }
+    } catch (err) { console.error('assign from persistent actions error', err); showError('Impossible d’assigner le son'); }
+  });
+
+  // Enregistrer: do not move the top '#recordBtn' here — leave it in the recorder bar
+
+  // Charger enregistrés/API
+  const loadBtn = document.createElement('button');
+  loadBtn.type = 'button'; loadBtn.className = 'action-btn'; loadBtn.textContent = 'Charger enregistrés/API'; loadBtn.disabled = false;
+  loadBtn.addEventListener('click', async () => {
+    try {
+      const info = actions._info || {};
+      const deps = { listRecordings, getRecording, decodeFileToBuffer, decodedItems: [{ id: 'current', source: 'local', buffer: info.buffer, name: info.name, index: 0 }] };
+      await showLocalSoundsChooser(loadBtn, async (selectedItems) => {
+        if (selectedItems && selectedItems.length > 0) {
+          const it = selectedItems[0];
+          if (it.buffer) {
+            try { if (lastRecordingCanvas) drawMiniWaveform(it.buffer, lastRecordingCanvas); } catch (err) { console.warn('draw preview error', err); }
+            const labelEl = document.getElementById('lastRecordingLabel'); if (labelEl) labelEl.textContent = 'Son chargé/enregistré';
+            actions._info = actions._info || {}; actions._info.buffer = it.buffer; actions._info.name = it.name;
+            Array.from(actions.querySelectorAll('button')).forEach(b => b.disabled = false);
+            const left = document.getElementById('persistentRecordingPlayLeft'); if (left) left.disabled = false;
+          }
+        }
+      }, deps, async (selectedItems) => {
+        if (selectedItems && selectedItems.length > 0) {
+          const it = selectedItems[0];
+          if (it.buffer) {
+            try { if (lastRecordingCanvas) drawMiniWaveform(it.buffer, lastRecordingCanvas); } catch (err) { console.warn('draw preview error', err); }
+            const labelEl = document.getElementById('lastRecordingLabel'); if (labelEl) labelEl.textContent = 'Son chargé/enregistré';
+            actions._info = actions._info || {}; actions._info.buffer = it.buffer; actions._info.name = it.name;
+            Array.from(actions.querySelectorAll('button')).forEach(b => b.disabled = false);
+            const left = document.getElementById('persistentRecordingPlayLeft'); if (left) left.disabled = false;
+          }
+        }
+      }, { showCheckboxes: false, showCreateButton: false });
+    } catch (err) { console.error('load chooser error', err); showError('Impossible de charger'); }
+  });
+
+  // create a save button local to the persistent actions (restore original save behaviour)
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button'; saveBtn.className = 'action-btn'; saveBtn.textContent = "Sauvegarder l'audio"; saveBtn.disabled = true;
+  saveBtn.addEventListener('click', async () => {
+    try {
+      const info = actions._info || {};
+      const suggested = info.name || `mic-${Date.now()}.webm`;
+      const name = prompt('Nom pour cet enregistrement:', suggested) || suggested;
+      const blob = info.blob || (info.file ? new Blob([info.file], { type: info.file.type }) : null);
+      if (!blob) { showError('Aucun blob à sauvegarder'); return; }
+      await saveRecording(blob, name);
+      showStatus('Enregistré');
+    } catch (err) { console.error('save recording error', err); showError('Erreur lors de la sauvegarde'); }
+  });
+
+  actions.appendChild(addBtn); actions.appendChild(saveBtn); actions.appendChild(loadBtn);
+  container.appendChild(actions);
 }
 
 // Build a custom dropdown to replace the visible behaviour of `#presetSelect` so
@@ -278,19 +418,6 @@ function createCustomPresetDropdown() {
   presetSelect.parentElement.insertBefore(wrapper, presetSelect);
 }
 
-/**
- * Normalise la réponse du serveur vers:
- *    [{ name, files: [absoluteUrl, ...] }, ...]
- *
- * D'après ton "exemple REST" (script.js), le serveur renvoie un array de presets,
- * avec pour chaque preset:
- *   { name, type, samples: [{ name, url }, ...] }
- * et les fichiers audio sont servis sous /presets/<sample.url> sur le même host:port.
- * On doit donc construire: absoluteUrl = new URL(`presets/${sample.url}`, API_BASE).
- *
- * Références: ton script.js de démo (coté serveur HTML) construit "presets/" + sample.url,
- * et fetch('/api/presets') côté même origin. :contentReference[oaicite:2]{index=2}
- */
 function normalizePresets(raw) {
   const makeAbsFromApi = (p) => new URL(p, API_BASE).toString();
 
@@ -378,6 +505,20 @@ async function loadPresetByIndex(idx) {
       preset.files.map(url => loadAndDecodeSound(url, ctx))
     );
 
+    // remap decoded sounds so that they are assigned starting from
+    // bottom-left button, filling rows left->right then moving upward.
+    // mapping sequence for 4x4 grid: bottom row indices 12..15, then 8..11, then 4..7, then 0..3
+    const mapping = [12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3];
+    const assignedDecoded = new Array(16).fill(null);
+    const assignedUrls = new Array(16).fill(null);
+    const assignedIndex = new Array(16).fill(null); // which preset file index was assigned here
+    for (let p = 0; p < decodedSounds.length && p < mapping.length; p++) {
+      const target = mapping[p];
+      assignedDecoded[target] = decodedSounds[p];
+      assignedUrls[target] = preset.files[p];
+      assignedIndex[target] = p;
+    }
+
     // 2) génère les boutons — toujours créer une grille fixe de slots (16) pour permettre
     // l'assignation de sons locaux même si le preset en fournit moins.
     const totalSlots = KEYBOARD_KEYS.length || 16;
@@ -386,12 +527,13 @@ async function loadPresetByIndex(idx) {
       const assignedKey = KEYBOARD_KEYS[i] || null;
       if (assignedKey) btn.dataset.key = assignedKey;
 
-      const decodedSound = decodedSounds[i];
-      const url = preset.files[i];
+      const decodedSound = assignedDecoded[i];
+      const url = assignedUrls[i];
 
       if (decodedSound) {
         const name = (url && url.split('/').pop()) || `sound ${i + 1}`;
-        btn.textContent = `Play ${i + 1} — ${name}`;
+        const soundNum = (assignedIndex[i] !== null && typeof assignedIndex[i] !== 'undefined') ? (assignedIndex[i] + 1) : (i + 1);
+        btn.textContent = `Play ${soundNum} — ${name}`;
 
         // click handler: same flow as before (show waveform, compute trims, play)
         btn.addEventListener('click', () => {
@@ -477,7 +619,8 @@ function createWaveformUI() {
   overlayCanvas.style.background = 'transparent';
   container.appendChild(overlayCanvas);
 
-  buttonsContainer.insertAdjacentElement('afterend', container);
+  // place the waveform container above the buttons grid
+  buttonsContainer.insertAdjacentElement('beforebegin', container);
 
   trimbarsDrawer = new TrimbarsDrawer(overlayCanvas, 100, 200);
 
@@ -526,8 +669,8 @@ function showWaveformForSound(buffer, url) {
   currentShownBuffer = buffer;
   currentShownUrl = url;
 
-  // draw waveform
-  drawWaveform(buffer, waveformCanvas);
+  // draw waveform (ensure overlay canvas is synced for trimbars)
+  drawWaveform(buffer, waveformCanvas, overlayCanvas);
 
   // restore trims (seconds -> pixels)
   const stored = trimPositions.get(url) || { start: 0, end: buffer.duration };
@@ -537,6 +680,168 @@ function showWaveformForSound(buffer, url) {
   trimbarsDrawer.rightTrimBar.x = rightPx;
   // ensure a normalized entry
   trimPositions.set(url, { start: stored.start, end: stored.end });
+}
+
+// Show action toolbar next to waveform container for the most recently loaded/recorded sound
+function showRecordingActions(anchorContainer, info) {
+  // info: { buffer, file, blob, name }
+  if (!anchorContainer) return;
+  // if persistent UI exists, update it instead of creating transient actions
+  const persistent = document.getElementById('persistentRecordingActions');
+  const leftPersistent = document.getElementById('persistentRecordingPlayLeft');
+  if (persistent && leftPersistent) {
+    persistent._info = info;
+    const hasBlobOrBuffer = !!(info && (info.buffer || info.blob || info.file));
+    Array.from(persistent.querySelectorAll('button')).forEach(b => { b.disabled = !hasBlobOrBuffer; });
+    // also enable/disable the left-side play button (it's not inside the persistent container)
+    leftPersistent.disabled = !hasBlobOrBuffer;
+    // update left play handler
+    leftPersistent.onclick = async (ev) => {
+      ev.stopPropagation();
+      try {
+        if (ctx && ctx.state === 'suspended') await ctx.resume();
+        let buffer = info.buffer;
+        if (!buffer) {
+          const f = info.file || (info.blob ? new File([info.blob], info.name || 'rec.webm', { type: info.blob.type || 'audio/webm' }) : null);
+          if (f) {
+            buffer = await decodeFileToBuffer(f);
+            info.buffer = buffer;
+          }
+        }
+        if (buffer) playSound(ctx, buffer, 0, buffer.duration);
+      } catch (err) { console.error('Error playing from persistent left button', err); }
+    };
+    return;
+  }
+
+    // left-side Play button (inside same container, positioned to the left of the canvas)
+    const playLeft = document.createElement('button');
+    playLeft.id = 'recordingPlayLeft';
+    playLeft.type = 'button';
+    playLeft.className = 'action-btn';
+    playLeft.textContent = 'Play';
+    // position it on the left side of the canvas
+    playLeft.style.position = 'absolute';
+    playLeft.style.left = `-56px`;
+    playLeft.style.top = '50%';
+    playLeft.style.transform = 'translateY(-50%)';
+    playLeft.style.zIndex = '10002';
+    // click handler: play the loaded buffer (decode if needed)
+    playLeft.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      try {
+        // ensure audio context resumed
+        if (ctx && ctx.state === 'suspended') await ctx.resume();
+        let buffer = info.buffer;
+        if (!buffer) {
+          // try decode from file/blob if available
+          const f = info.file || (info.blob ? new File([info.blob], info.name || 'rec.webm', { type: info.blob.type || 'audio/webm' }) : null);
+          if (f) {
+            buffer = await decodeFileToBuffer(f);
+            info.buffer = buffer;
+          }
+        }
+        if (buffer) {
+          // play full buffer
+          playSound(ctx, buffer, 0, buffer.duration);
+        }
+      } catch (err) {
+        console.error('Error playing preview from left button', err);
+      }
+    });
+    anchorContainer.appendChild(playLeft);
+
+    const actions = document.createElement('div');
+    actions.id = 'recordingActions';
+    actions.style.position = 'absolute';
+    // position inside the waveform container: place to the right of the canvas
+    actions.style.left = `${anchorContainer.clientWidth + 8}px`;
+    actions.style.top = `0px`;
+    actions.style.zIndex = '10001';
+    actions.style.display = 'flex';
+    actions.style.flexDirection = 'column';
+    actions.style.gap = '8px';
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button'; addBtn.className = 'action-btn'; addBtn.textContent = 'Ajouter au sampler';
+  addBtn.addEventListener('click', async () => {
+    // ask for slot number
+    const s = prompt('Numéro du slot (1–16) pour assigner ce son:', '1');
+    if (!s) return;
+    const n = Number(s);
+    if (!n || isNaN(n) || n < 1 || n > 16) { alert('Numéro invalide'); return; }
+    try {
+      if (info.file) {
+        await assignFileToSlot(info.file, n - 1);
+        showStatus(`Assigné au slot ${n}`);
+      } else if (info.blob) {
+        const f = new File([info.blob], info.name || `rec-${Date.now()}.webm`, { type: info.blob.type || 'audio/webm' });
+        await assignFileToSlot(f, n - 1);
+        showStatus(`Assigné au slot ${n}`);
+      } else if (info.buffer) {
+        // create a temporary file by encoding? fallback: use assignBufferToSlot if exists
+        if (typeof assignBufferToSlot === 'function') {
+          await assignBufferToSlot(info.buffer, info.name || `sound`, n - 1);
+          showStatus(`Assigné au slot ${n}`);
+        } else {
+          alert('Impossible d’assigner: pas de fichier disponible');
+        }
+      }
+    } catch (err) { console.error('assign from actions error', err); showError('Impossible d’assigner le son'); }
+  });
+  actions.appendChild(addBtn);
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button'; saveBtn.className = 'action-btn'; saveBtn.textContent = "Sauvegarder l'audio";
+  saveBtn.addEventListener('click', async () => {
+    try {
+      const suggested = info.name || `mic-${Date.now()}.webm`;
+      const name = prompt('Nom pour cet enregistrement:', suggested) || suggested;
+      const blob = info.blob || (info.file ? new Blob([info.file], { type: info.file.type }) : null);
+      if (!blob) { showError('Aucun blob à sauvegarder'); return; }
+      await saveRecording(blob, name);
+      showStatus('Enregistré');
+    } catch (err) { console.error('save recording error', err); showError('Erreur lors de la sauvegarde'); }
+  });
+  actions.appendChild(saveBtn);
+
+  const loadBtn = document.createElement('button');
+  loadBtn.type = 'button'; loadBtn.className = 'action-btn'; loadBtn.textContent = 'Charger enregistrés/API';
+  loadBtn.addEventListener('click', async () => {
+    try {
+      // show chooser to pick saved recordings or local decoded items
+      const deps = { listRecordings, decodeFileToBuffer, decodedItems: [{ id: 'current', source: 'local', buffer: info.buffer, name: info.name, index: 0 }] };
+      const chooser = await showLocalSoundsChooser(actions, async (selectedItems) => {
+        if (selectedItems && selectedItems.length > 0) {
+          const it = selectedItems[0];
+          if (it.buffer) {
+            // draw selected sound on the top preview canvas only
+            try { if (lastRecordingCanvas) drawMiniWaveform(it.buffer, lastRecordingCanvas); } catch (err) { console.warn('draw preview error', err); }
+            const labelEl = document.getElementById('lastRecordingLabel'); if (labelEl) labelEl.textContent = 'Son chargé/enregistré';
+            // update info to new loaded sound and refresh actions
+            info.buffer = it.buffer; info.name = it.name;
+            showRecordingActions(anchorContainer, info);
+          }
+        }
+      }, deps, async (selectedItems) => {
+        // onSelect: invoked when user clicks Play in the chooser — preview and close + load into top preview
+        if (selectedItems && selectedItems.length > 0) {
+          const it = selectedItems[0];
+          if (it.buffer) {
+            try { if (lastRecordingCanvas) drawMiniWaveform(it.buffer, lastRecordingCanvas); } catch (err) { console.warn('draw preview error', err); }
+            const labelEl = document.getElementById('lastRecordingLabel'); if (labelEl) labelEl.textContent = 'Son chargé/enregistré';
+            info.buffer = it.buffer; info.name = it.name;
+            showRecordingActions(anchorContainer, info);
+          }
+        }
+      }, { showCheckboxes: false, showCreateButton: false });
+      // chooser handles its own DOM
+    } catch (err) { console.error('load chooser error', err); showError('Impossible de charger'); }
+  });
+  actions.appendChild(loadBtn);
+
+  // attach actions inside the waveform container so they move together
+  anchorContainer.appendChild(actions);
 }
 
 // overlay draw loop
@@ -576,74 +881,7 @@ function onGlobalKeyDown(e) {
   setTimeout(() => btn.classList.remove('keyboard-active'), 140);
 }
 
-function drawWaveform(buffer, canvas) {
-  const cw = canvas.width = Math.floor(canvas.clientWidth * (window.devicePixelRatio || 1));
-  const ch = canvas.height = Math.floor(120 * (window.devicePixelRatio || 1));
-  // keep overlay canvas in sync (pixel size)
-  if (overlayCanvas) {
-    overlayCanvas.width = cw;
-    overlayCanvas.height = ch;
-  }
-  const ctx2 = canvas.getContext('2d');
-  ctx2.clearRect(0, 0, cw, ch);
-
-  // Use first channel (or mix if needed)
-  const channelData = buffer.numberOfChannels > 0 ? buffer.getChannelData(0) : new Float32Array(0);
-  const step = Math.max(1, Math.floor(channelData.length / cw));
-  ctx2.fillStyle = '#fafafa';
-  ctx2.fillRect(0, 0, cw, ch);
-  ctx2.lineWidth = 1;
-  ctx2.strokeStyle = '#007acc';
-  ctx2.beginPath();
-
-  for (let i = 0; i < cw; i++) {
-    const start = i * step;
-    let min = 1.0, max = -1.0;
-    for (let j = 0; j < step && (start + j) < channelData.length; j++) {
-      const v = channelData[start + j];
-      if (v < min) min = v;
-      if (v > max) max = v;
-    }
-    const y1 = ((1 + max) / 2) * ch;
-    const y2 = ((1 + min) / 2) * ch;
-    ctx2.moveTo(i + 0.5, y1);
-    ctx2.lineTo(i + 0.5, y2);
-  }
-  ctx2.stroke();
-}
-
-// Draw a compact preview waveform for the last recorded sound
-function drawMiniWaveform(buffer, canvas) {
-  if (!canvas || !buffer) return;
-  const dpr = window.devicePixelRatio || 1;
-  const cw = canvas.width = Math.floor(canvas.clientWidth * dpr);
-  const ch = canvas.height = Math.floor(80 * dpr);
-  const ctx2 = canvas.getContext('2d');
-  ctx2.clearRect(0, 0, cw, ch);
-  // background
-  ctx2.fillStyle = '#ffffff';
-  ctx2.fillRect(0, 0, cw, ch);
-
-  const channelData = buffer.numberOfChannels > 0 ? buffer.getChannelData(0) : new Float32Array(0);
-  const step = Math.max(1, Math.floor(channelData.length / cw));
-  ctx2.lineWidth = 1 * dpr;
-  ctx2.strokeStyle = '#0b2a3a';
-  ctx2.beginPath();
-  for (let i = 0; i < cw; i++) {
-    const start = i * step;
-    let min = 1.0, max = -1.0;
-    for (let j = 0; j < step && (start + j) < channelData.length; j++) {
-      const v = channelData[start + j];
-      if (v < min) min = v;
-      if (v > max) max = v;
-    }
-    const y1 = ((1 + max) / 2) * ch;
-    const y2 = ((1 + min) / 2) * ch;
-    ctx2.moveTo(i + 0.5 * dpr, y1);
-    ctx2.lineTo(i + 0.5 * dpr, y2);
-  }
-  ctx2.stroke();
-}
+// waveform rendering moved to `js/waveforms.js` (imported at top)
 
 // --- Import / Drag & Drop helpers ---
 
@@ -652,6 +890,18 @@ const filePicker = document.getElementById('filePicker');
 async function decodeFileToBuffer(file) {
   const arrayBuffer = await file.arrayBuffer();
   return await ctx.decodeAudioData(arrayBuffer);
+}
+
+function pickFileForSlot(slotIndex) {
+  if (!filePicker) return;
+  filePicker.onchange = async (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (f) await assignFileToSlot(f, slotIndex);
+    // reset
+    filePicker.value = '';
+    filePicker.onchange = null;
+  };
+  filePicker.click();
 }
 
 async function assignFileToSlot(file, slotIndex) {
@@ -742,6 +992,55 @@ async function assignFileToSlot(file, slotIndex) {
   }
 }
 
+// Assign an existing decoded AudioBuffer to a slot (used when we have a buffer already)
+async function assignBufferToSlot(buffer, name, slotIndex) {
+  if (!buffer) return;
+  try {
+    decodedSounds[slotIndex] = buffer;
+    const pseudoUrl = `generated:${name}:${Date.now()}`;
+    trimPositions.set(pseudoUrl, { start: 0, end: buffer.duration });
+
+    // update or create button for this slot
+    let btn = currentButtons[slotIndex];
+    if (!btn) {
+      btn = document.createElement('button');
+      buttonsContainer.appendChild(btn);
+      currentButtons[slotIndex] = btn;
+    }
+
+    const key = KEYBOARD_KEYS[slotIndex];
+    const newBtn = btn.cloneNode(true);
+    buttonsContainer.replaceChild(newBtn, btn);
+    currentButtons[slotIndex] = newBtn;
+    if (key) newBtn.dataset.key = key;
+    newBtn.textContent = `Play ${slotIndex + 1} — ${name}`;
+    newBtn.classList.remove('empty-slot');
+
+    newBtn.addEventListener('click', () => {
+      try {
+        showWaveformForSound(buffer, pseudoUrl);
+      } catch (err) { console.warn('Unable to show waveform for buffer', err); }
+      if (ctx.state === 'suspended') ctx.resume();
+      let start = 0, end = buffer.duration;
+      const stored = trimPositions.get(pseudoUrl);
+      if (stored) { start = stored.start; end = stored.end; }
+      start = Math.max(0, Math.min(start, buffer.duration));
+      end = Math.max(start + 0.01, Math.min(end, buffer.duration));
+      trimPositions.set(pseudoUrl, { start, end });
+      playSound(ctx, buffer, start, end);
+    });
+
+    enableDragDropOnButton(newBtn, slotIndex);
+    enableFilePickerOnButton(newBtn, slotIndex);
+    newBtn.classList.add('assigned-local');
+    setTimeout(() => newBtn.classList.remove('assigned-local'), 400);
+    showStatus(`Assigned ${name} to slot ${slotIndex + 1}`);
+  } catch (err) {
+    console.error('assignBufferToSlot error', err);
+    showError('Impossible d’assigner le buffer');
+  }
+}
+
 
 
 function enableDragDropOnButton(btn, slotIndex) {
@@ -771,10 +1070,17 @@ function enableFilePickerOnButton(btn, slotIndex) {
     assign.style.userSelect = 'none';
     btn.appendChild(assign);
   }
-  assign.onclick = (e) => {
+  assign.onclick = async (e) => {
     e.stopPropagation();
     // show chooser to pick a local file or select from saved recordings
-    showRecordingsChooser(slotIndex, assign);
+    try {
+      const chooser = await showRecordingsChooser(slotIndex, assign, { listRecordings, getRecording, deleteRecording, assignFileToSlot, decodeFileToBuffer });
+      if (chooser && typeof chooser.wireLocal === 'function') {
+        chooser.wireLocal(() => pickFileForSlot(slotIndex));
+      }
+    } catch (err) {
+      console.error('Error showing recordings chooser', err);
+    }
   };
   // prevent parent button from receiving mouse events originating on the assign icon
   assign.addEventListener('mousedown', (e) => { e.stopPropagation(); });
@@ -788,160 +1094,7 @@ function enableFilePickerOnButton(btn, slotIndex) {
   });
 }
 
-function pickFileForSlot(slotIndex) {
-  filePicker.onchange = async (ev) => {
-    const f = ev.target.files && ev.target.files[0];
-    if (f) await assignFileToSlot(f, slotIndex);
-    filePicker.value = '';
-    filePicker.onchange = null;
-  };
-  filePicker.click();
-}
-
-// Show a small chooser UI near the assign button to pick a saved recording or local file
-async function showRecordingsChooser(slotIndex, anchorEl) {
-  // remove any existing chooser
-  const existing = document.getElementById('recordingsChooser');
-  if (existing) existing.remove();
-
-  const container = document.createElement('div');
-  container.id = 'recordingsChooser';
-  container.style.position = 'absolute';
-  container.style.zIndex = 9999;
-  // visual styles (background, border, shadow, padding) are controlled by CSS
-  container.style.padding = '8px';
-  container.style.maxHeight = '220px';
-  container.style.overflow = 'auto';
-
-  // position near anchor
-  const rect = anchorEl.getBoundingClientRect();
-  container.style.left = `${rect.right + window.scrollX + 6}px`;
-  container.style.top = `${rect.top + window.scrollY}px`;
-
-  const title = document.createElement('div');
-  title.textContent = 'Choisir une source';
-  title.style.fontWeight = '600';
-  title.style.marginBottom = '6px';
-  container.appendChild(title);
-
-  // two-button menu: local file OR saved recordings
-  const btnRow = document.createElement('div');
-  btnRow.style.display = 'flex';
-  btnRow.style.gap = '6px';
-  btnRow.style.marginBottom = '8px';
-
-  const localBtn = document.createElement('button');
-  localBtn.type = 'button';
-  localBtn.textContent = 'Fichier local…';
-  localBtn.className = 'action-btn';
-  localBtn.onclick = () => { pickFileForSlot(slotIndex); container.remove(); };
-  btnRow.appendChild(localBtn);
-
-  const savedBtn = document.createElement('button');
-  savedBtn.type = 'button';
-  savedBtn.textContent = 'Enregistrements…';
-  savedBtn.className = 'action-btn';
-  btnRow.appendChild(savedBtn);
-
-  container.appendChild(btnRow);
-
-  // list area (populated only when user clicks "Enregistrements…")
-  const list = document.createElement('div');
-  list.style.display = 'block';
-  list.style.fontSize = '13px';
-  list.style.minWidth = '220px';
-  container.appendChild(list);
-
-  async function populateRecordings() {
-    list.innerHTML = '';
-    try {
-      const recs = await listRecordings();
-      if (!recs || recs.length === 0) {
-        const p = document.createElement('div');
-        p.textContent = 'Aucun enregistrement trouvé.';
-        p.style.color = '#666';
-        list.appendChild(p);
-        return;
-      }
-      recs.sort((a,b) => b.created - a.created);
-      recs.forEach(r => {
-        const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.justifyContent = 'space-between';
-        row.style.alignItems = 'center';
-        row.style.marginBottom = '6px';
-
-        const label = document.createElement('div');
-        label.textContent = r.name || `rec-${r.id}`;
-        label.title = new Date(r.created).toLocaleString();
-        label.style.flex = '1';
-        label.style.marginRight = '8px';
-        row.appendChild(label);
-
-        const useBtn = document.createElement('button');
-        useBtn.type = 'button';
-        useBtn.textContent = 'Use';
-        useBtn.className = 'action-btn';
-        useBtn.onclick = async (e) => {
-          e.stopPropagation();
-          const ent = await getRecording(r.id);
-          if (!ent || !ent.blob) { showError('Impossible de récupérer l’enregistrement.'); return; }
-          const file = new File([ent.blob], ent.name || `rec-${r.id}`, { type: ent.type || 'audio/webm' });
-          await assignFileToSlot(file, slotIndex);
-          container.remove();
-        };
-        row.appendChild(useBtn);
-
-        const delBtn = document.createElement('button');
-        delBtn.type = 'button';
-        delBtn.textContent = 'Delete';
-        delBtn.style.marginLeft = '6px';
-        delBtn.className = 'action-btn';
-        delBtn.onclick = async (ev) => {
-          ev.stopPropagation();
-          if (!confirm(`Supprimer ${r.name || r.id} ?`)) return;
-          await deleteRecording(r.id);
-          row.remove();
-        };
-        row.appendChild(delBtn);
-
-        list.appendChild(row);
-      });
-    } catch (err) {
-      const p = document.createElement('div');
-      p.textContent = 'Erreur en accédant aux enregistrements.';
-      p.style.color = 'red';
-      list.appendChild(p);
-      console.error('showRecordingsChooser error', err);
-    }
-  }
-
-  savedBtn.onclick = () => populateRecordings();
-
-  // close on outside click
-  function onDocClick(e) {
-    if (!container.contains(e.target)) container.remove();
-  }
-  setTimeout(() => document.addEventListener('click', onDocClick), 10);
-
-  document.body.appendChild(container);
-
-  // ensure chooser fits in viewport: if it overflows right, position it to the left of anchor
-  requestAnimationFrame(() => {
-    const cRect = container.getBoundingClientRect();
-    const winW = window.innerWidth;
-    if (cRect.right > winW) {
-      const newLeft = Math.max(6, rect.left + window.scrollX - cRect.width - 6);
-      container.style.left = `${newLeft}px`;
-    }
-    // if bottom overflows, clamp vertically
-    const winH = window.innerHeight;
-    if (cRect.bottom > winH) {
-      const newTop = Math.max(6, rect.bottom + window.scrollY - cRect.height);
-      container.style.top = `${newTop}px`;
-    }
-  });
-}
+// recordings chooser implementation extracted to `js/choosers.js`
 
 // ---------- Add Preset menu + generated preset helpers ----------
 function showAddPresetMenu(anchorEl) {
@@ -973,9 +1126,15 @@ function showAddPresetMenu(anchorEl) {
   // create actions
   container.appendChild(makeBtn('Créer un sampler à partir des sons locaux', async () => {
     // open chooser listing local decoded sounds (files assigned locally + decoded from preset)
-    const localBuffers = decodedSounds.map((b,i) => ({ buffer: b || null, name: (currentButtons[i] && currentButtons[i].textContent) ? currentButtons[i].textContent : `sound ${i+1}`, index: i }));
+    // remove auto-generated "Play N — " prefix from button labels when building chooser names
+    const localBuffers = decodedSounds.map((b,i) => {
+      const raw = (currentButtons[i] && currentButtons[i].textContent) ? currentButtons[i].textContent.trim() : null;
+      const clean = raw ? raw.replace(/^Play\s+\d+\s*[—-]\s*/i, '') : `sound ${i+1}`;
+      return { buffer: b || null, name: clean || `sound ${i+1}`, index: i };
+    });
     const available = localBuffers.filter(x => x.buffer);
     if (!available || available.length === 0) { showError('Aucun son local disponible.'); return; }
+    // hide per-item "Charger" button in this context: users only need to select sounds to build the sampler
     showLocalSoundsChooser(container, async (selectedItems) => {
       // selectedItems: array of { buffer, name, index }
       // build buffers array of length 16 placing selected sounds in order
@@ -984,7 +1143,7 @@ function showAddPresetMenu(anchorEl) {
       const names = new Array(steps).fill('');
       selectedItems.slice(0,steps).forEach((it, i) => { buffers[i] = it.buffer; names[i] = it.name || `sound ${i+1}`; });
       createPresetFromBuffers(`Local sampler ${Date.now()}`, buffers, names, 'buffers');
-    });
+    }, { listRecordings, getRecording, decodeFileToBuffer, decodedItems: localBuffers.map((b) => ({ id: `local-${b.index}`, source: 'local', buffer: b.buffer, name: b.name, index: b.index })) }, undefined, { showLoadButton: false });
   }));
 
   container.appendChild(makeBtn('Slicer un enregistrement sur les silences', async () => {
@@ -1101,20 +1260,37 @@ function showAddPresetMenu(anchorEl) {
   }));
 
   container.appendChild(makeBtn('Créer un sampler en pitchant le son', async () => {
-    // take most recent recording or first decoded sound
+    // Prefer the buffer currently loaded into the top preview UI (persistent actions _info),
+    // then the buffer shown in the bottom waveform (`currentShownBuffer`),
+    // then the most recent saved recording, then any decoded preset sound.
     let buf = null;
-    const recs = await listRecordings();
-    if (recs && recs.length) {
-      const r = recs.sort((a,b)=>b.created-a.created)[0];
-      const ent = await getRecording(r.id);
-      if (ent && ent.blob) {
-        const file = new File([ent.blob], ent.name || `rec-${r.id}`, { type: ent.type || 'audio/webm' });
-        buf = await decodeFileToBuffer(file);
-      }
+    const persistentActions = document.getElementById('persistentRecordingActions');
+    if (persistentActions && persistentActions._info && persistentActions._info.buffer) {
+      buf = persistentActions._info.buffer;
+    } else if (typeof currentShownBuffer !== 'undefined' && currentShownBuffer) {
+      buf = currentShownBuffer;
     }
+
+    // fallback: most recent saved recording
+    if (!buf) {
+      try {
+        const recs = await listRecordings();
+        if (recs && recs.length) {
+          const r = recs.sort((a,b)=>b.created-a.created)[0];
+          const ent = await getRecording(r.id);
+          if (ent && ent.blob) {
+            const file = new File([ent.blob], ent.name || `rec-${r.id}`, { type: ent.type || 'audio/webm' });
+            try { buf = await decodeFileToBuffer(file); } catch (err) { console.warn('decode recent recording failed', err); }
+          }
+        }
+      } catch (err) { console.warn('error while fetching recordings for pitch sampler fallback', err); }
+    }
+
+    // last resort: any decoded sound in the current preset
     if (!buf && decodedSounds && decodedSounds.find(Boolean)) {
       buf = decodedSounds.find(Boolean);
     }
+
     if (!buf) { showError('Aucun son disponible pour pitcher.'); return; }
     // create preset with pitch rates across slots (e.g., 16 steps from 0.5 to 2)
     const steps = 16;
@@ -1154,6 +1330,15 @@ async function loadGeneratedPreset(preset) {
   // use buffers directly (some may be null)
   decodedSounds = data.buffers.slice(0);
 
+  // Remap generated buffers the same way as presets: start at bottom-left
+  const mapping = [12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3];
+  const assignedBuffers = new Array(16).fill(null);
+  const assignedIndex = new Array(16).fill(null);
+  for (let p = 0; p < data.buffers.length && p < mapping.length; p++) {
+    assignedBuffers[mapping[p]] = data.buffers[p];
+    assignedIndex[mapping[p]] = p;
+  }
+
   // build grid of buttons (reuse same logic as loadPresetByIndex but without decoding)
   const totalSlots = KEYBOARD_KEYS.length || 16;
   for (let i=0;i<totalSlots;i++) {
@@ -1161,10 +1346,12 @@ async function loadGeneratedPreset(preset) {
     const assignedKey = KEYBOARD_KEYS[i] || null;
     if (assignedKey) btn.dataset.key = assignedKey;
 
-    const buffer = decodedSounds[i];
-    const name = data.names && data.names[i] ? data.names[i] : (buffer ? `sound ${i+1}` : '');
+    const buffer = assignedBuffers[i];
+    const pIndex = assignedIndex[i];
+    const name = (typeof pIndex === 'number' && data.names && data.names[pIndex]) ? data.names[pIndex] : (buffer ? `sound ${i+1}` : '');
     if (buffer) {
-      btn.textContent = `Play ${i+1} — ${name}`;
+      const soundNum = (typeof pIndex === 'number') ? (pIndex + 1) : (i + 1);
+      btn.textContent = `Play ${soundNum} — ${name}`;
       const pseudoUrl = `generated:${preset.id}:${i}`;
       trimPositions.set(pseudoUrl, { start: 0, end: buffer.duration });
       btn.addEventListener('click', () => {
@@ -1191,181 +1378,4 @@ async function loadGeneratedPreset(preset) {
   }
 }
 
-// Display chooser to pick local decoded sounds (checkbox list, max 16)
-async function showLocalSoundsChooser(anchorEl, onCreate) {
-  const existing = document.getElementById('localSoundsChooser');
-  if (existing) { existing.remove(); return; }
-
-  // gather decodedSounds (local assignments) and recordings from IndexedDB
-  const decodedItems = decodedSounds.map((b,i) => ({
-    id: `local-${i}`,
-    source: 'local',
-    buffer: b || null,
-    name: (currentButtons[i] && currentButtons[i].textContent) ? currentButtons[i].textContent : `sound ${i+1}`,
-    index: i
-  }));
-
-  let recs = [];
-  try {
-    recs = await listRecordings();
-  } catch (err) {
-    console.warn('Unable to list recordings', err);
-  }
-
-  const recordingItems = (recs || []).map(r => ({
-    id: `rec-${r.id}`,
-    source: 'recording',
-    buffer: null,
-    blob: r.blob,
-    name: r.name || `rec-${r.id}`,
-    recId: r.id
-  }));
-
-  const items = [...decodedItems, ...recordingItems];
-  const available = items.filter(it => it.buffer || it.blob);
-  if (!available || available.length === 0) { showError('Aucun son local disponible.'); return; }
-
-  const container = document.createElement('div');
-  container.id = 'localSoundsChooser';
-  container.style.position = 'absolute';
-  container.style.zIndex = '10000';
-  container.style.padding = '10px';
-
-  const rect = anchorEl.getBoundingClientRect();
-  container.style.left = `${Math.max(6, rect.left + window.scrollX)}px`;
-  container.style.top = `${rect.bottom + window.scrollY + 8}px`;
-
-  const title = document.createElement('div');
-  title.textContent = 'Choisir jusqu’à 16 sons locaux';
-  title.style.fontWeight = '700';
-  title.style.marginBottom = '8px';
-  container.appendChild(title);
-
-  const list = document.createElement('div');
-  list.style.maxHeight = '320px';
-  list.style.overflow = 'auto';
-  list.style.marginBottom = '8px';
-  container.appendChild(list);
-
-  let selectedCount = 0;
-  const checkboxes = [];
-
-  available.forEach((it, idx) => {
-    const row = document.createElement('div');
-    row.style.display = 'flex';
-    row.style.alignItems = 'center';
-    row.style.justifyContent = 'space-between';
-    row.style.marginBottom = '6px';
-
-    const left = document.createElement('div');
-    left.style.display = 'flex';
-    left.style.alignItems = 'center';
-
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.style.marginRight = '8px';
-    cb.dataset.itemId = it.id;
-    checkboxes.push(cb);
-
-    const label = document.createElement('div');
-    label.textContent = it.name;
-    label.style.flex = '1';
-    left.appendChild(cb);
-    left.appendChild(label);
-
-    const play = document.createElement('button');
-    play.type = 'button';
-    play.className = 'action-btn';
-    play.textContent = 'Play';
-    play.style.marginLeft = '8px';
-    play.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (ctx.state === 'suspended') ctx.resume();
-      try {
-        let buffer = it.buffer;
-        if (!buffer && it.blob) {
-          const file = new File([it.blob], it.name || 'rec.webm', { type: it.blob.type });
-          buffer = await decodeFileToBuffer(file);
-          // cache decoded buffer for reuse
-          it.buffer = buffer;
-        }
-        if (buffer) playSound(ctx, buffer, 0, buffer.duration);
-      } catch (err) {
-        console.error('play preview error', err);
-      }
-    });
-
-    row.appendChild(left);
-    row.appendChild(play);
-    list.appendChild(row);
-
-    cb.addEventListener('change', () => {
-      if (cb.checked) {
-        if (selectedCount >= 16) { cb.checked = false; showError('Limite 16 sons'); return; }
-        selectedCount++;
-      } else {
-        selectedCount = Math.max(0, selectedCount - 1);
-      }
-    });
-  });
-
-  const actions = document.createElement('div');
-  actions.style.display = 'flex';
-  actions.style.gap = '8px';
-
-  const createBtn = document.createElement('button');
-  createBtn.type = 'button';
-  createBtn.className = 'action-btn';
-  createBtn.textContent = 'Créer le sampler';
-  createBtn.addEventListener('click', async () => {
-    const selected = [];
-    for (const cb of checkboxes) {
-      if (cb.checked) {
-        const id = cb.dataset.itemId;
-        const it = available.find(x => x.id === id);
-        if (!it) continue;
-        // ensure buffer is decoded for recordings
-        if (!it.buffer && it.blob) {
-          try {
-            const file = new File([it.blob], it.name || 'rec.webm', { type: it.blob.type });
-            it.buffer = await decodeFileToBuffer(file);
-          } catch (err) { console.error('decode for create error', err); }
-        }
-        selected.push({ buffer: it.buffer, name: it.name, index: it.index });
-      }
-    }
-    if (selected.length === 0) { showError('Sélectionne au moins un son'); return; }
-    onCreate(selected);
-    container.remove();
-  });
-
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.className = 'action-btn';
-  cancelBtn.textContent = 'Annuler';
-  cancelBtn.addEventListener('click', () => container.remove());
-
-  actions.appendChild(createBtn);
-  actions.appendChild(cancelBtn);
-  container.appendChild(actions);
-
-  document.body.appendChild(container);
-  // after appending, ensure chooser fits in viewport and adjust position if needed
-  requestAnimationFrame(() => {
-    const cRect = container.getBoundingClientRect();
-    const winW = window.innerWidth;
-    const winH = window.innerHeight;
-    // adjust horizontal position if overflowing right
-    if (cRect.right > winW) {
-      const newLeft = Math.max(6, Math.min(rect.left + window.scrollX, winW - cRect.width - 6));
-      container.style.left = `${newLeft}px`;
-    }
-    // adjust vertical position if overflowing bottom (open above anchor if needed)
-    if (cRect.bottom > winH) {
-      const newTop = Math.max(6, rect.top + window.scrollY - cRect.height - 8);
-      container.style.top = `${newTop}px`;
-    }
-  });
-
-  setTimeout(() => document.addEventListener('click', (e) => { if (!container.contains(e.target)) container.remove(); }), 10);
-}
+// local-sounds chooser extracted to `js/choosers.js`
