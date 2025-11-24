@@ -2,12 +2,13 @@
 // Corrigé pour Live Server + API sur http://localhost:3000
 
 import { loadAndDecodeSound, playSound } from './soundutils.js';
-import TrimbarsDrawer from './trimbarsdrawer.js';
 import { pixelToSeconds } from './utils.js';
 import { saveRecording, listRecordings, getRecording, deleteRecording } from './indexeddb.js';
 import { mkBtn, mkEl, placePopupNear, makeListRow } from './ui-helpers.js';
 import { drawWaveform, drawMiniWaveform } from './waveforms.js';
 import { showRecordingsChooser, showLocalSoundsChooser } from './choosers.js';
+import { initAssignments } from './assignments.js';
+import { initWaveformUI } from './waveform-ui.js';
 
 // ====== CONFIG ORIGINS ======
 const API_BASE = 'http://localhost:3000';               // <- API + fichiers audio
@@ -51,6 +52,7 @@ let waveformCanvas, overlayCanvas, trimbarsDrawer;
 let mousePos = { x: 0, y: 0 };
 let currentShownBuffer = null;
 let currentShownUrl = null;
+let showWaveformForSound;
 // recording
 let mediaStream = null;
 let mediaRecorder = null;
@@ -82,13 +84,56 @@ window.onload = async function init() {
     const addPresetBtn = document.getElementById('addPresetBtn');
     if (addPresetBtn) addPresetBtn.addEventListener('click', (e) => { e.stopPropagation(); showAddPresetMenu(addPresetBtn); });
 
-    // 3) Charge le premier preset par défaut
-    presetSelect.disabled = false;
-  // create waveform UI (hidden until a sound is selected)
-  createWaveformUI();
-  // create persistent recording actions UI (visible from start)
-  createPersistentRecordingActions();
-  await loadPresetByIndex(0);
+      // 3) Charge le premier preset par défaut
+      presetSelect.disabled = false;
+    // create waveform UI (hidden until a sound is selected) — initialize the extracted module
+    const wfui = initWaveformUI(buttonsContainer);
+    waveformCanvas = wfui.waveformCanvas;
+    overlayCanvas = wfui.overlayCanvas;
+    trimbarsDrawer = wfui.trimbarsDrawer;
+    // wrap the wfui showWaveformForSound so main.js state stays in sync
+    showWaveformForSound = (buffer, url) => {
+      try {
+        if (typeof wfui.showWaveformForSound === 'function') wfui.showWaveformForSound(buffer, url, trimPositions);
+      } catch (err) { console.warn('showWaveformForSound wrapper error', err); }
+      currentShownBuffer = buffer;
+      currentShownUrl = url;
+    };
+
+    // listen for trim changes emitted by waveform-ui and persist them into trimPositions map
+    window.addEventListener('waveform-trim-changed', (ev) => {
+      try {
+        const d = ev && ev.detail;
+        if (d && d.url) {
+          trimPositions.set(d.url, { start: d.start, end: d.end });
+        }
+      } catch (err) { console.warn('waveform-trim-changed handler error', err); }
+    });
+    // initialize assignment helpers (drag/drop, picker, assign functions)
+    const assignments = initAssignments({
+      decodeFileToBuffer,
+      buttonsContainer,
+      // provide accessors for currentButtons so the module updates main.js state directly
+      getCurrentButtons: () => currentButtons,
+      setCurrentButton: (idx, node) => { currentButtons[idx] = node; },
+      KEYBOARD_KEYS,
+      trimPositions,
+      playSound: (buffer, s, e, r) => playSound(ctx, buffer, s, e, r),
+      filePicker: document.getElementById('filePicker'),
+      showRecordingsChooser,
+      listRecordings,
+      getRecording,
+      deleteRecording,
+      showWaveformForSound,
+      showStatus,
+      showError
+    });
+    // expose assignments module globally for backward-compatible wrappers
+    window.assignments = assignments;
+
+    // create persistent recording actions UI (visible from start)
+    createPersistentRecordingActions();
+    await loadPresetByIndex(0);
 
     // 4) Changement de preset
     // keep native select change handler for programmatic changes
@@ -272,10 +317,13 @@ function createPersistentRecordingActions() {
     const info = actions._info || {};
     const s = prompt('Numéro du slot (1–16) pour assigner ce son:', '1');
     if (!s) return; const n = Number(s); if (!n || isNaN(n) || n < 1 || n > 16) { alert('Numéro invalide'); return; }
+    // map display number (1..16, bottom-left ordering) to internal slot index
+    const target = (assignments && typeof assignments.displayNumberToSlotIndex === 'function') ? assignments.displayNumberToSlotIndex(n) : (n - 1);
+    if (target === null) { alert('Numéro invalide'); return; }
     try {
-      if (info.file) { await assignFileToSlot(info.file, n - 1); showStatus(`Assigné au slot ${n}`); }
-      else if (info.blob) { const f = new File([info.blob], info.name || `rec-${Date.now()}.webm`, { type: info.blob.type || 'audio/webm' }); await assignFileToSlot(f, n - 1); showStatus(`Assigné au slot ${n}`); }
-      else if (info.buffer && typeof assignBufferToSlot === 'function') { await assignBufferToSlot(info.buffer, info.name || 'sound', n - 1); showStatus(`Assigné au slot ${n}`); }
+      if (info.file) { await assignments.assignFileToSlot(info.file, target); showStatus(`Assigné au slot ${n}`); }
+      else if (info.blob) { const f = new File([info.blob], info.name || `rec-${Date.now()}.webm`, { type: info.blob.type || 'audio/webm' }); await assignments.assignFileToSlot(f, target); showStatus(`Assigné au slot ${n}`); }
+      else if (info.buffer && typeof assignments.assignBufferToSlot === 'function') { await assignments.assignBufferToSlot(info.buffer, info.name || 'sound', target); showStatus(`Assigné au slot ${n}`); }
       else { alert('Aucun son disponible à assigner'); }
     } catch (err) { console.error('assign from persistent actions error', err); showError('Impossible d’assigner le son'); }
   });
@@ -573,8 +621,8 @@ async function loadPresetByIndex(idx) {
       }
 
       // enable drag & drop and file picker on every slot so users can assign local sounds
-      enableDragDropOnButton(btn, i);
-      enableFilePickerOnButton(btn, i);
+      assignments.enableDragDropOnButton(btn, i);
+      assignments.enableFilePickerOnButton(btn, i);
 
       buttonsContainer.appendChild(btn);
       currentButtons.push(btn);
@@ -587,100 +635,7 @@ async function loadPresetByIndex(idx) {
   }
 }
 
-// ---------- Waveform + trimbars UI helpers ----------
-function createWaveformUI() {
-  const container = document.createElement('div');
-  container.id = 'waveformContainer';
-
-  container.style.margin = '12px auto';
-  container.style.position = 'relative';
-  container.style.maxWidth = '800px';
-  container.style.width = '100%';
-  container.style.boxSizing = 'border-box';
-
-  waveformCanvas = document.createElement('canvas');
-  waveformCanvas.width = 800;
-  waveformCanvas.height = 120;
-  waveformCanvas.style.width = '100%';
-  waveformCanvas.style.display = 'block';
-  waveformCanvas.style.border = '1px solid #000000ff';
-  waveformCanvas.style.zIndex = '1';
-  container.appendChild(waveformCanvas);
-
-  overlayCanvas = document.createElement('canvas');
-  overlayCanvas.width = 800;
-  overlayCanvas.height = 120;
-  overlayCanvas.style.position = 'absolute';
-  overlayCanvas.style.left = '0';
-  overlayCanvas.style.top = '0';
-  overlayCanvas.style.width = '100%';
-  overlayCanvas.style.pointerEvents = 'auto';
-  overlayCanvas.style.zIndex = '2';
-  overlayCanvas.style.background = 'transparent';
-  container.appendChild(overlayCanvas);
-
-  // place the waveform container above the buttons grid
-  buttonsContainer.insertAdjacentElement('beforebegin', container);
-
-  trimbarsDrawer = new TrimbarsDrawer(overlayCanvas, 100, 200);
-
-  // convert client coordinates to canvas pixel coordinates (account for DPR)
-  overlayCanvas.onmousemove = (evt) => {
-    const rect = overlayCanvas.getBoundingClientRect();
-    const scaleX = overlayCanvas.width / rect.width;
-    const scaleY = overlayCanvas.height / rect.height;
-    mousePos.x = (evt.clientX - rect.left) * scaleX;
-    mousePos.y = (evt.clientY - rect.top) * scaleY;
-    trimbarsDrawer.moveTrimBars(mousePos);
-  };
-
-  overlayCanvas.onmousedown = () => trimbarsDrawer.startDrag();
-
-  function stopDragAndSave() {
-    trimbarsDrawer.stopDrag();
-    // save current trim positions for the current sound (if any)
-    if (currentShownBuffer && currentShownUrl) {
-      const leftPx = trimbarsDrawer.leftTrimBar.x;
-      const rightPx = trimbarsDrawer.rightTrimBar.x;
-      const leftSec = pixelToSeconds(leftPx, currentShownBuffer.duration, waveformCanvas.width);
-      const rightSec = pixelToSeconds(rightPx, currentShownBuffer.duration, waveformCanvas.width);
-      trimPositions.set(currentShownUrl, { start: leftSec, end: rightSec });
-    }
-  }
-
-  overlayCanvas.onmouseup = stopDragAndSave;
-  // ensure we also catch mouseup outside the canvas
-  window.addEventListener('mouseup', (evt) => {
-    // if a drag was in progress, stop it and save
-    if ((trimbarsDrawer.leftTrimBar && trimbarsDrawer.leftTrimBar.dragged) ||
-        (trimbarsDrawer.rightTrimBar && trimbarsDrawer.rightTrimBar.dragged)) {
-      stopDragAndSave();
-    }
-  });
-
-  requestAnimationFrame(animateOverlay);
-  container.style.display = 'none';
-}
-
-function showWaveformForSound(buffer, url) {
-  if (!waveformCanvas) return;
-  const container = waveformCanvas.parentElement;
-  container.style.display = '';
-  currentShownBuffer = buffer;
-  currentShownUrl = url;
-
-  // draw waveform (ensure overlay canvas is synced for trimbars)
-  drawWaveform(buffer, waveformCanvas, overlayCanvas);
-
-  // restore trims (seconds -> pixels)
-  const stored = trimPositions.get(url) || { start: 0, end: buffer.duration };
-  const leftPx = (stored.start / buffer.duration) * waveformCanvas.width;
-  const rightPx = (stored.end / buffer.duration) * waveformCanvas.width;
-  trimbarsDrawer.leftTrimBar.x = leftPx;
-  trimbarsDrawer.rightTrimBar.x = rightPx;
-  // ensure a normalized entry
-  trimPositions.set(url, { start: stored.start, end: stored.end });
-}
+// Waveform UI is extracted to `js/waveform-ui.js` and initialized during startup.
 
 // Show action toolbar next to waveform container for the most recently loaded/recorded sound
 function showRecordingActions(anchorContainer, info) {
@@ -770,18 +725,21 @@ function showRecordingActions(anchorContainer, info) {
     if (!s) return;
     const n = Number(s);
     if (!n || isNaN(n) || n < 1 || n > 16) { alert('Numéro invalide'); return; }
+    // map display number (1..16 bottom-left ordering) to internal slot index
+    const target = (assignments && typeof assignments.displayNumberToSlotIndex === 'function') ? assignments.displayNumberToSlotIndex(n) : (n - 1);
+    if (target === null) { alert('Numéro invalide'); return; }
     try {
       if (info.file) {
-        await assignFileToSlot(info.file, n - 1);
+        await assignments.assignFileToSlot(info.file, target);
         showStatus(`Assigné au slot ${n}`);
       } else if (info.blob) {
         const f = new File([info.blob], info.name || `rec-${Date.now()}.webm`, { type: info.blob.type || 'audio/webm' });
-        await assignFileToSlot(f, n - 1);
+        await assignments.assignFileToSlot(f, target);
         showStatus(`Assigné au slot ${n}`);
       } else if (info.buffer) {
         // create a temporary file by encoding? fallback: use assignBufferToSlot if exists
         if (typeof assignBufferToSlot === 'function') {
-          await assignBufferToSlot(info.buffer, info.name || `sound`, n - 1);
+          await assignments.assignBufferToSlot(info.buffer, info.name || `sound`, target);
           showStatus(`Assigné au slot ${n}`);
         } else {
           alert('Impossible d’assigner: pas de fichier disponible');
@@ -844,14 +802,7 @@ function showRecordingActions(anchorContainer, info) {
   anchorContainer.appendChild(actions);
 }
 
-// overlay draw loop
-function animateOverlay() {
-  if (trimbarsDrawer && overlayCanvas) {
-    trimbarsDrawer.clear();
-    trimbarsDrawer.draw();
-  }
-  requestAnimationFrame(animateOverlay);
-}
+// overlay draw loop is now handled by `js/waveform-ui.js`
 
 // Global keyboard handler: map pressed key to the corresponding button (if assigned)
 function onGlobalKeyDown(e) {
@@ -893,205 +844,31 @@ async function decodeFileToBuffer(file) {
 }
 
 function pickFileForSlot(slotIndex) {
-  if (!filePicker) return;
-  filePicker.onchange = async (ev) => {
-    const f = ev.target.files && ev.target.files[0];
-    if (f) await assignFileToSlot(f, slotIndex);
-    // reset
-    filePicker.value = '';
-    filePicker.onchange = null;
-  };
-  filePicker.click();
+  if (window.assignments && typeof window.assignments.pickFileForSlot === 'function') return window.assignments.pickFileForSlot(slotIndex);
+  // no-op if assignments module isn't available
 }
 
 async function assignFileToSlot(file, slotIndex) {
-  if (!file) return;
-  try {
-    showStatus(`Decoding ${file.name}…`);
-    let buffer = await decodeFileToBuffer(file);
-    // no trimming on assign (restored original behavior)
-
-    // store buffer in decodedSounds
-    decodedSounds[slotIndex] = buffer;
-
-    // create a pseudo-url for trimming storage and identification
-    const pseudoUrl = `local:${file.name}`;
-    trimPositions.set(pseudoUrl, { start: 0, end: buffer.duration });
-
-    // update or create button for this slot
-    let btn = currentButtons[slotIndex];
-    if (!btn) {
-      btn = document.createElement('button');
-      buttonsContainer.appendChild(btn);
-      currentButtons[slotIndex] = btn;
-    }
-
-  // set label and data-key will be applied to the replacement node so we can
-  // ensure any 'empty-slot' class is removed and formatting matches preset buttons
-  const key = KEYBOARD_KEYS[slotIndex];
-
-  // remove existing listeners to avoid duplicates
-  const newBtn = btn.cloneNode(true);
-  // replace in DOM and currentButtons
-  buttonsContainer.replaceChild(newBtn, btn);
-  currentButtons[slotIndex] = newBtn;
-
-  // apply proper label / key on the replacement node and remove empty-slot styling
-  if (key) newBtn.dataset.key = key;
-  newBtn.textContent = `Play ${slotIndex + 1} — ${file.name}`;
-  newBtn.classList.remove('empty-slot');
-
-    // add click listener to show waveform + play the assigned buffer (same flow as preset buttons)
-    newBtn.addEventListener('click', () => {
-      try {
-        // show waveform + trimbars for this local buffer (use pseudoUrl as identifier)
-        showWaveformForSound(buffer, pseudoUrl);
-      } catch (err) {
-        console.warn('Unable to show waveform for local file', err);
-      }
-
-      // resume audio context on user gesture
-      if (ctx.state === 'suspended') ctx.resume();
-
-      // compute start/end from stored trims (if available) or trimbars
-      let start = 0;
-      let end = buffer.duration;
-      const stored = trimPositions.get(pseudoUrl);
-      if (stored) {
-        start = stored.start;
-        end = stored.end;
-      } else if (trimbarsDrawer) {
-        const l = trimbarsDrawer.leftTrimBar.x;
-        const r = trimbarsDrawer.rightTrimBar.x;
-        start = pixelToSeconds(l, buffer.duration, waveformCanvas.width);
-        end = pixelToSeconds(r, buffer.duration, waveformCanvas.width);
-      }
-
-      // clamp
-      start = Math.max(0, Math.min(start, buffer.duration));
-      end = Math.max(start + 0.01, Math.min(end, buffer.duration));
-
-      // store current trim before playing
-      trimPositions.set(pseudoUrl, { start, end });
-
-      // play using stored trims
-      playSound(ctx, buffer, start, end);
-    });
-
-    // re-enable drag/drop & picker on the replacement button
-    enableDragDropOnButton(newBtn, slotIndex);
-    enableFilePickerOnButton(newBtn, slotIndex);
-
-    // small visual feedback
-    newBtn.classList.add('assigned-local');
-    setTimeout(() => newBtn.classList.remove('assigned-local'), 400);
-    showStatus(`Assigned ${file.name} to slot ${slotIndex + 1}`);
-  } catch (err) {
-    console.error('assignFileToSlot error', err);
-    showError('Impossible de décoder le fichier audio (format non supporté?)');
-  }
+  if (window.assignments && typeof window.assignments.assignFileToSlot === 'function') return window.assignments.assignFileToSlot(file, slotIndex);
+  // no-op fallback: assignments module not available
 }
 
 // Assign an existing decoded AudioBuffer to a slot (used when we have a buffer already)
 async function assignBufferToSlot(buffer, name, slotIndex) {
-  if (!buffer) return;
-  try {
-    decodedSounds[slotIndex] = buffer;
-    const pseudoUrl = `generated:${name}:${Date.now()}`;
-    trimPositions.set(pseudoUrl, { start: 0, end: buffer.duration });
-
-    // update or create button for this slot
-    let btn = currentButtons[slotIndex];
-    if (!btn) {
-      btn = document.createElement('button');
-      buttonsContainer.appendChild(btn);
-      currentButtons[slotIndex] = btn;
-    }
-
-    const key = KEYBOARD_KEYS[slotIndex];
-    const newBtn = btn.cloneNode(true);
-    buttonsContainer.replaceChild(newBtn, btn);
-    currentButtons[slotIndex] = newBtn;
-    if (key) newBtn.dataset.key = key;
-    newBtn.textContent = `Play ${slotIndex + 1} — ${name}`;
-    newBtn.classList.remove('empty-slot');
-
-    newBtn.addEventListener('click', () => {
-      try {
-        showWaveformForSound(buffer, pseudoUrl);
-      } catch (err) { console.warn('Unable to show waveform for buffer', err); }
-      if (ctx.state === 'suspended') ctx.resume();
-      let start = 0, end = buffer.duration;
-      const stored = trimPositions.get(pseudoUrl);
-      if (stored) { start = stored.start; end = stored.end; }
-      start = Math.max(0, Math.min(start, buffer.duration));
-      end = Math.max(start + 0.01, Math.min(end, buffer.duration));
-      trimPositions.set(pseudoUrl, { start, end });
-      playSound(ctx, buffer, start, end);
-    });
-
-    enableDragDropOnButton(newBtn, slotIndex);
-    enableFilePickerOnButton(newBtn, slotIndex);
-    newBtn.classList.add('assigned-local');
-    setTimeout(() => newBtn.classList.remove('assigned-local'), 400);
-    showStatus(`Assigned ${name} to slot ${slotIndex + 1}`);
-  } catch (err) {
-    console.error('assignBufferToSlot error', err);
-    showError('Impossible d’assigner le buffer');
-  }
+  if (window.assignments && typeof window.assignments.assignBufferToSlot === 'function') return window.assignments.assignBufferToSlot(buffer, name, slotIndex);
+  // no-op fallback
 }
 
 
 
 function enableDragDropOnButton(btn, slotIndex) {
-  btn.addEventListener('dragover', (e) => { e.preventDefault(); btn.classList.add('drag-over'); });
-  btn.addEventListener('dragleave', () => btn.classList.remove('drag-over'));
-  btn.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    btn.classList.remove('drag-over');
-    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    if (!f) return;
-    await assignFileToSlot(f, slotIndex);
-  });
+  if (window.assignments && typeof window.assignments.enableDragDropOnButton === 'function') return window.assignments.enableDragDropOnButton(btn, slotIndex);
+  // no-op fallback
 }
 
 function enableFilePickerOnButton(btn, slotIndex) {
-  // Add a small assign icon (bottom-right) that opens the file picker when clicked.
-  // This prevents accidental picker opening when the user double-clicks to play.
-  let assign = btn.querySelector('.assign-icon');
-  if (!assign) {
-    // use a non-button element to avoid nesting interactive controls inside a <button>
-    assign = document.createElement('span');
-    assign.className = 'assign-icon';
-    assign.title = 'Assign local file';
-    assign.textContent = '+';
-    assign.tabIndex = 0; // make focusable for keyboard
-    assign.style.cursor = 'pointer';
-    assign.style.userSelect = 'none';
-    btn.appendChild(assign);
-  }
-  assign.onclick = async (e) => {
-    e.stopPropagation();
-    // show chooser to pick a local file or select from saved recordings
-    try {
-      const chooser = await showRecordingsChooser(slotIndex, assign, { listRecordings, getRecording, deleteRecording, assignFileToSlot, decodeFileToBuffer });
-      if (chooser && typeof chooser.wireLocal === 'function') {
-        chooser.wireLocal(() => pickFileForSlot(slotIndex));
-      }
-    } catch (err) {
-      console.error('Error showing recordings chooser', err);
-    }
-  };
-  // prevent parent button from receiving mouse events originating on the assign icon
-  assign.addEventListener('mousedown', (e) => { e.stopPropagation(); });
-  assign.addEventListener('mouseup', (e) => { e.stopPropagation(); });
-  // support keyboard activation (Enter / Space)
-  assign.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      assign.click();
-    }
-  });
+  if (window.assignments && typeof window.assignments.enableFilePickerOnButton === 'function') return window.assignments.enableFilePickerOnButton(btn, slotIndex);
+  // no-op fallback
 }
 
 // recordings chooser implementation extracted to `js/choosers.js`
@@ -1377,5 +1154,3 @@ async function loadGeneratedPreset(preset) {
     currentButtons.push(btn);
   }
 }
-
-// local-sounds chooser extracted to `js/choosers.js`
