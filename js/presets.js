@@ -17,6 +17,7 @@ export function initPresets(deps = {}) {
 
   let presets = [];
   const generatedPresetStore = new Map();
+  let lastDecodedSounds = [];
   let assignments = null;
   let waveformCanvas = null;
   let trimbarsDrawer = null;
@@ -58,8 +59,8 @@ export function initPresets(deps = {}) {
   async function loadGeneratedPreset(preset) {
     const data = generatedPresetStore.get(preset.id);
     if (!data) throw new Error('Generated preset not found');
-
     const decodedSounds = data.buffers.slice(0);
+    lastDecodedSounds = decodedSounds.slice(0);
     const mapping = [12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3];
     const assignedBuffers = new Array(16).fill(null);
     const assignedIndex = new Array(16).fill(null);
@@ -136,6 +137,7 @@ export function initPresets(deps = {}) {
     showStatus(`Loading ${preset.files.length} file(s)…`);
     try {
       const decodedSounds = await Promise.all(preset.files.map(url => loadAndDecodeSound(url)));
+      lastDecodedSounds = decodedSounds.slice(0);
       const mapping = [12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3];
       const assignedDecoded = new Array(16).fill(null);
       const assignedUrls = new Array(16).fill(null);
@@ -202,6 +204,7 @@ export function initPresets(deps = {}) {
     loadGeneratedPreset,
     setAssignments,
     setWaveformUI,
-    setPresets: (p) => { presets = p; }
+    setPresets: (p) => { presets = p; },
+    getDecodedSounds: () => lastDecodedSounds
   };
 }
