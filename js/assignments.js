@@ -91,7 +91,22 @@ export function initAssignments(deps) {
 
       newBtn.addEventListener('click', () => {
         try { if (showWaveformForSound) showWaveformForSound(buffer, pseudoUrl); } catch (err) { console.warn('Unable to show waveform for local file', err); }
-        try { if (playSound) playSound(buffer, 0, buffer.duration); } catch (err) { console.warn('playSound error', err); }
+        try {
+          // prefer explicit trim positions stored in trimPositions map (set by waveform-ui)
+          let start = 0;
+          let end = buffer.duration;
+          try {
+            const stored = (trimPositions && typeof trimPositions.get === 'function') ? trimPositions.get(pseudoUrl) : null;
+            try { console.debug('[assignments] click local pseudoUrl=', pseudoUrl, 'stored=', stored); } catch(e){}
+            if (stored) {
+              start = typeof stored.start === 'number' ? stored.start : start;
+              end = typeof stored.end === 'number' ? stored.end : end;
+            }
+          } catch (err) { /* ignore trim read errors and fallback to full buffer */ }
+          start = Math.max(0, Math.min(start, buffer.duration));
+          end = Math.max(start + 0.01, Math.min(end, buffer.duration));
+          if (playSound) playSound(buffer, start, end);
+        } catch (err) { console.warn('playSound error', err); }
       });
 
       enableDragDropOnButton(newBtn, slotIndex);
@@ -127,7 +142,20 @@ export function initAssignments(deps) {
 
       newBtn.addEventListener('click', () => {
         try { if (showWaveformForSound) showWaveformForSound(buffer, pseudoUrl); } catch (e) { console.warn(e); }
-        try { if (playSound) playSound(buffer, 0, buffer.duration); } catch (err) { console.warn('playSound error', err); }
+        try {
+          let start = 0;
+          let end = buffer.duration;
+          try {
+            const stored = (trimPositions && typeof trimPositions.get === 'function') ? trimPositions.get(pseudoUrl) : null;
+            if (stored) {
+              start = typeof stored.start === 'number' ? stored.start : start;
+              end = typeof stored.end === 'number' ? stored.end : end;
+            }
+          } catch (err) { }
+          start = Math.max(0, Math.min(start, buffer.duration));
+          end = Math.max(start + 0.01, Math.min(end, buffer.duration));
+          if (playSound) playSound(buffer, start, end);
+        } catch (err) { console.warn('playSound error', err); }
       });
 
       enableDragDropOnButton(newBtn, slotIndex);
@@ -212,6 +240,9 @@ export function initAssignments(deps) {
     assignBufferToSlot,
     enableDragDropOnButton,
     enableFilePickerOnButton,
-    displayNumberToSlotIndex
+    displayNumberToSlotIndex,
+    // expose accessors so other modules (presets) can keep the main `currentButtons` array in sync
+    getCurrentButtons: () => (typeof getCurrentButtons === 'function' ? getCurrentButtons() : (currentButtons || [])),
+    setCurrentButton: (idx, node) => { if (typeof setCurrentButton === 'function') return setCurrentButton(idx, node); if (currentButtons) currentButtons[idx] = node; }
   };
 }

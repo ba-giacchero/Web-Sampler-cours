@@ -8,7 +8,9 @@ import { mkBtn, mkEl, placePopupNear, makeListRow } from './ui-helpers.js';
 import { drawWaveform, drawMiniWaveform } from './waveforms.js';
 import { showRecordingsChooser, showLocalSoundsChooser } from './choosers.js';
 import { initAssignments } from './assignments.js';
+import { initPresets } from './presets.js';
 import { initWaveformUI } from './waveform-ui.js';
+import { initRecorder } from './recorder.js';
 
 // ====== CONFIG ORIGINS ======
 const API_BASE = 'http://localhost:3000';               // <- API + fichiers audio
@@ -27,9 +29,8 @@ const lastRecordingCanvas = document.getElementById('lastRecordingCanvas');
 // Etat
 let presets = [];          // [{ name, files:[absoluteUrl,...] }, ...]
 let decodedSounds = [];    // AudioBuffer[] du preset courant
-// store for generated presets (in-memory)
-// key -> { buffers: AudioBuffer[], names: string[], type: 'buffers'|'pitch', pitchRates?: number[] }
-const generatedPresetStore = new Map();
+// presets module instance (initialized in window.onload)
+let presetsModule = null;
 // current visible buttons for keyboard mapping
 let currentButtons = [];
 // per-sound trim positions stored by url (seconds)
@@ -53,10 +54,7 @@ let mousePos = { x: 0, y: 0 };
 let currentShownBuffer = null;
 let currentShownUrl = null;
 let showWaveformForSound;
-// recording
-let mediaStream = null;
-let mediaRecorder = null;
-let recordedChunks = [];
+// recording (handled by `js/recorder.js`)
 
 window.onload = async function init() {
   ctx = new AudioContext();
@@ -67,25 +65,7 @@ window.onload = async function init() {
   };
 
   try {
-    // 1) Récupère les presets du serveur
-    const raw = await fetchPresets(PRESETS_URL);
-    presets = normalizePresets(raw); // -> [{name, files:[absUrl,...]}]
-
-    if (!Array.isArray(presets) || presets.length === 0) {
-      throw new Error('Aucun preset utilisable dans la réponse du serveur.');
-    }
-
-    // 2) Remplit le <select>
-    fillPresetSelect(presets);
-    // create a styled custom dropdown that replaces the native select's visible UI
-    createCustomPresetDropdown();
-
-    // wire "Ajouter un preset" button
-    const addPresetBtn = document.getElementById('addPresetBtn');
-    if (addPresetBtn) addPresetBtn.addEventListener('click', (e) => { e.stopPropagation(); showAddPresetMenu(addPresetBtn); });
-
-      // 3) Charge le premier preset par défaut
-      presetSelect.disabled = false;
+    // preset loading will be handled by the `presets` module (initialized below)
     // create waveform UI (hidden until a sound is selected) — initialize the extracted module
     const wfui = initWaveformUI(buttonsContainer);
     waveformCanvas = wfui.waveformCanvas;
@@ -105,6 +85,8 @@ window.onload = async function init() {
       try {
         const d = ev && ev.detail;
         if (d && d.url) {
+          // diagnostic log to trace trim changes
+          try { console.debug('[waveform-trim-changed] url=', d.url, 'start=', d.start, 'end=', d.end); } catch(e){}
           trimPositions.set(d.url, { start: d.start, end: d.end });
         }
       } catch (err) { console.warn('waveform-trim-changed handler error', err); }
@@ -131,9 +113,39 @@ window.onload = async function init() {
     // expose assignments module globally for backward-compatible wrappers
     window.assignments = assignments;
 
+    // initialize presets module and fetch presets (requires assignments + waveform UI available)
+    presetsModule = initPresets({
+      API_BASE,
+      loadAndDecodeSound: (url) => loadAndDecodeSound(url, ctx),
+      buttonsContainer,
+      KEYBOARD_KEYS,
+      playSound: (buffer, s, e, r) => playSound(ctx, buffer, s, e, r),
+      showWaveformForSound,
+      showStatus,
+      showError,
+      decodeFileToBuffer,
+      drawMiniWaveform,
+      trimPositions
+    });
+    presetsModule.setAssignments(assignments);
+    presetsModule.setWaveformUI({ waveformCanvas, trimbarsDrawer });
+    // fetch + normalize + populate select
+    const raw = await presetsModule.fetchPresets(PRESETS_URL);
+    presets = presetsModule.normalizePresets(raw);
+    presetsModule.setPresets(presets);
+    if (!Array.isArray(presets) || presets.length === 0) {
+      throw new Error('Aucun preset utilisable dans la réponse du serveur.');
+    }
+    fillPresetSelect(presets);
+    createCustomPresetDropdown();
+    const addPresetBtn = document.getElementById('addPresetBtn');
+    if (addPresetBtn) addPresetBtn.addEventListener('click', (e) => { e.stopPropagation(); showAddPresetMenu(addPresetBtn); });
+    // enable select now
+    presetSelect.disabled = false;
+
     // create persistent recording actions UI (visible from start)
     createPersistentRecordingActions();
-    await loadPresetByIndex(0);
+    if (presetsModule && typeof presetsModule.loadPresetByIndex === 'function') await presetsModule.loadPresetByIndex(0);
 
     // 4) Changement de preset
     // keep native select change handler for programmatic changes
@@ -141,93 +153,37 @@ window.onload = async function init() {
       const idx = Number(presetSelect.value);
       // update custom UI label if present
       const labelBtn = document.querySelector('.custom-select-btn .label');
-      if (labelBtn && presetSelect.options && presetSelect.options[idx]) labelBtn.textContent = presetSelect.options[idx].textContent;
-      await loadPresetByIndex(idx);
+        if (labelBtn && presetSelect.options && presetSelect.options[idx]) labelBtn.textContent = presetSelect.options[idx].textContent;
+        if (presetsModule && typeof presetsModule.loadPresetByIndex === 'function') await presetsModule.loadPresetByIndex(idx);
     });
 
     // keyboard listener for triggering sounds via assigned keys
     window.addEventListener('keydown', onGlobalKeyDown);
 
-    // Recorder UI: wire record button and status
+    // Recorder UI: wire record button and status via recorder module
     const recordBtn = document.getElementById('recordBtn');
     const recordStatus = document.getElementById('recordStatus');
 
-    async function startRecordingForSlot(slotIndex) {
-      try {
-        if (!mediaStream) {
-          mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        }
-      } catch (err) {
-        showError('Accès au micro refusé ou indisponible.');
-        return;
-      }
-
-      recordedChunks = [];
-      try {
-        mediaRecorder = new MediaRecorder(mediaStream);
-      } catch (err) {
-        showError('MediaRecorder non supporté par ce navigateur.');
-        return;
-      }
-
-      mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordedChunks.push(e.data); };
-      mediaRecorder.onstop = async () => {
-        const blob = new Blob(recordedChunks, { type: recordedChunks[0] ? recordedChunks[0].type : 'audio/webm' });
-        const defaultName = `mic-recording-${Date.now()}.webm`;
-        recordStatus.textContent = 'Décodage…';
-
-        // create a File-like object for reuse
-        const file = new File([blob], defaultName, { type: blob.type });
-
-        // Draw mini preview
-        try {
-          const previewBuffer = await decodeFileToBuffer(file);
-          if (lastRecordingCanvas && previewBuffer) drawMiniWaveform(previewBuffer, lastRecordingCanvas);
-        } catch (err) {
-          console.warn('Unable to decode preview buffer', err);
-        }
-
-        // Decode full buffer and display it in the waveform rectangle
-        try {
-          const buffer = await decodeFileToBuffer(file);
-          // show only on the top preview canvas (do NOT draw on the bottom waveform canvas)
-          const labelEl = document.getElementById('lastRecordingLabel');
-          if (labelEl) labelEl.textContent = 'Son chargé/enregistré';
-          try {
-            // draw a mini/full preview on the top canvas
-            if (lastRecordingCanvas) drawMiniWaveform(buffer, lastRecordingCanvas);
-          } catch (err) { console.warn('Unable to draw preview on top canvas', err); }
-          // show action toolbar attached to the top preview canvas (so bottom trimbars remain untouched)
-          const topParent = lastRecordingCanvas && lastRecordingCanvas.parentElement ? lastRecordingCanvas.parentElement : waveformCanvas.parentElement;
-          showRecordingActions(topParent, { buffer, file, blob, name: defaultName });
-          recordStatus.textContent = 'Enregistrement prêt';
-        } catch (err) {
-          console.error('Unable to decode recorded file', err);
-          showError('Impossible de décoder l’enregistrement.');
-          recordStatus.textContent = '';
-        }
-
-        setTimeout(() => { if (recordStatus) recordStatus.textContent = ''; }, 2500);
-      };
-
-      mediaRecorder.start();
-      if (recordBtn) recordBtn.textContent = 'Stop';
-      if (recordStatus) recordStatus.textContent = 'Enregistrement…';
-    }
-
-    function stopRecording() {
-      if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
-      if (recordBtn) recordBtn.textContent = 'Enregistrer avec le micro';
-    }
+    const recorder = initRecorder({
+      decodeFileToBuffer,
+      lastRecordingCanvas,
+      waveformCanvas,
+      drawMiniWaveform,
+      showRecordingActions,
+      showStatus,
+      showError,
+      recordBtn,
+      recordStatus
+    });
 
     if (recordBtn) {
       recordBtn.onclick = async () => {
         try {
-          if (mediaRecorder && mediaRecorder.state === 'recording') {
-            stopRecording();
+          if (recorder && typeof recorder.isRecording === 'function' && recorder.isRecording()) {
+            recorder.stopRecording();
             return;
           }
-          await startRecordingForSlot();
+          if (recorder && typeof recorder.startRecording === 'function') await recorder.startRecording();
         } catch (err) { console.error('recordBtn click error', err); }
       };
     }
@@ -238,13 +194,7 @@ window.onload = async function init() {
   }
 };
 
-// ---------- Fetch + normalisation ----------
-
-async function fetchPresets(url) {
-  const res = await fetch(url, { mode: 'cors' });
-  if (!res.ok) throw new Error(`HTTP ${res.status} en récupérant ${url}`);
-  return res.json();
-}
+// Preset fetching/normalisation moved to `js/presets.js`
 
 // create persistent actions UI under #lastRecordingContainer so buttons are visible from start
 function createPersistentRecordingActions() {
@@ -466,41 +416,7 @@ function createCustomPresetDropdown() {
   presetSelect.parentElement.insertBefore(wrapper, presetSelect);
 }
 
-function normalizePresets(raw) {
-  const makeAbsFromApi = (p) => new URL(p, API_BASE).toString();
-
-  // CAS attendu (array)
-  if (Array.isArray(raw)) {
-    return raw.map((preset, i) => {
-      // format serveur: samples = [{name, url}, ...]
-      let files = [];
-      if (Array.isArray(preset.samples)) {
-        files = preset.samples
-          .map(s => s && s.url ? `presets/${s.url}` : null)
-          .filter(Boolean)
-          .map(makeAbsFromApi); // -> absolu sur API_BASE
-      } else if (Array.isArray(preset.files)) {
-        // fallback: déjà des chemins (on les rend absolus par l'API)
-        files = preset.files.map(makeAbsFromApi);
-      } else if (Array.isArray(preset.urls)) {
-        files = preset.urls.map(makeAbsFromApi);
-      }
-
-      return {
-        name: preset.name || preset.title || `Preset ${i + 1}`,
-        files
-      };
-    }).filter(p => p.files.length > 0);
-  }
-
-  // CAS { presets: [...] }
-  if (raw && Array.isArray(raw.presets)) {
-    return normalizePresets(raw.presets);
-  }
-
-  // Autres formats -> vide
-  return [];
-}
+// Preset normalisation/loader moved to `js/presets.js` (use `presetsModule`)
 
 // ---------- UI helpers ----------
 
@@ -526,114 +442,7 @@ function clearButtons() {
 
 // ---------- Chargement d’un preset ----------
 
-async function loadPresetByIndex(idx) {
-  const preset = presets[idx];
-  if (!preset) return;
-
-  clearButtons();
-  showError('');
-  // handle generated presets
-  if (preset.generated) {
-    showStatus(`Loading generated preset…`);
-    try {
-      await loadGeneratedPreset(preset);
-      showStatus(`Loaded preset: ${preset.name}`);
-    } catch (err) {
-      console.error(err);
-      showError('Erreur lors du chargement du preset généré.');
-    }
-    return;
-  }
-
-  showStatus(`Loading ${preset.files.length} file(s)…`);
-
-  try {
-    // 1) charge + décode en parallèle
-    decodedSounds = await Promise.all(
-      preset.files.map(url => loadAndDecodeSound(url, ctx))
-    );
-
-    // remap decoded sounds so that they are assigned starting from
-    // bottom-left button, filling rows left->right then moving upward.
-    // mapping sequence for 4x4 grid: bottom row indices 12..15, then 8..11, then 4..7, then 0..3
-    const mapping = [12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3];
-    const assignedDecoded = new Array(16).fill(null);
-    const assignedUrls = new Array(16).fill(null);
-    const assignedIndex = new Array(16).fill(null); // which preset file index was assigned here
-    for (let p = 0; p < decodedSounds.length && p < mapping.length; p++) {
-      const target = mapping[p];
-      assignedDecoded[target] = decodedSounds[p];
-      assignedUrls[target] = preset.files[p];
-      assignedIndex[target] = p;
-    }
-
-    // 2) génère les boutons — toujours créer une grille fixe de slots (16) pour permettre
-    // l'assignation de sons locaux même si le preset en fournit moins.
-    const totalSlots = KEYBOARD_KEYS.length || 16;
-    for (let i = 0; i < totalSlots; i++) {
-      const btn = document.createElement('button');
-      const assignedKey = KEYBOARD_KEYS[i] || null;
-      if (assignedKey) btn.dataset.key = assignedKey;
-
-      const decodedSound = assignedDecoded[i];
-      const url = assignedUrls[i];
-
-      if (decodedSound) {
-        const name = (url && url.split('/').pop()) || `sound ${i + 1}`;
-        const soundNum = (assignedIndex[i] !== null && typeof assignedIndex[i] !== 'undefined') ? (assignedIndex[i] + 1) : (i + 1);
-        btn.textContent = `Play ${soundNum} — ${name}`;
-
-        // click handler: same flow as before (show waveform, compute trims, play)
-        btn.addEventListener('click', () => {
-          try {
-            showWaveformForSound(decodedSound, url);
-          } catch (err) {
-            console.warn('Unable to show waveform', err);
-          }
-
-          if (ctx.state === 'suspended') ctx.resume();
-
-          let start = 0;
-          let end = decodedSound.duration;
-          const stored = trimPositions.get(url);
-          if (stored) {
-            start = stored.start;
-            end = stored.end;
-          } else if (trimbarsDrawer) {
-            const l = trimbarsDrawer.leftTrimBar.x;
-            const r = trimbarsDrawer.rightTrimBar.x;
-            start = pixelToSeconds(l, decodedSound.duration, waveformCanvas.width);
-            end = pixelToSeconds(r, decodedSound.duration, waveformCanvas.width);
-          }
-
-          start = Math.max(0, Math.min(start, decodedSound.duration));
-          end = Math.max(start + 0.01, Math.min(end, decodedSound.duration));
-
-          trimPositions.set(url, { start, end });
-          playSound(ctx, decodedSound, start, end);
-        });
-      } else {
-        // empty slot — keep the button text-free; assignment via the small '+' or drag & drop
-        btn.textContent = '';
-        btn.classList.add('empty-slot');
-        btn.title = `Add a sound to slot ${i + 1}`;
-        // clicking empty slot does not play; assignment via assign-icon or drag & drop
-      }
-
-      // enable drag & drop and file picker on every slot so users can assign local sounds
-      assignments.enableDragDropOnButton(btn, i);
-      assignments.enableFilePickerOnButton(btn, i);
-
-      buttonsContainer.appendChild(btn);
-      currentButtons.push(btn);
-    }
-
-    showStatus(`Loaded preset: ${preset.name} (${decodedSounds.length} sounds)`);
-  } catch (err) {
-    console.error(err);
-    showError(`Erreur lors du chargement du preset "${preset.name}": ${err.message || err}`);
-  }
-}
+// Preset loading moved to `js/presets.js` (use `presetsModule.loadPresetByIndex`)
 
 // Waveform UI is extracted to `js/waveform-ui.js` and initialized during startup.
 
@@ -737,9 +546,8 @@ function showRecordingActions(anchorContainer, info) {
         await assignments.assignFileToSlot(f, target);
         showStatus(`Assigné au slot ${n}`);
       } else if (info.buffer) {
-        // create a temporary file by encoding? fallback: use assignBufferToSlot if exists
-        if (typeof assignBufferToSlot === 'function') {
-          await assignments.assignBufferToSlot(info.buffer, info.name || `sound`, target);
+        if (window.assignments && typeof window.assignments.assignBufferToSlot === 'function') {
+          await window.assignments.assignBufferToSlot(info.buffer, info.name || `sound`, target);
           showStatus(`Assigné au slot ${n}`);
         } else {
           alert('Impossible d’assigner: pas de fichier disponible');
@@ -843,33 +651,6 @@ async function decodeFileToBuffer(file) {
   return await ctx.decodeAudioData(arrayBuffer);
 }
 
-function pickFileForSlot(slotIndex) {
-  if (window.assignments && typeof window.assignments.pickFileForSlot === 'function') return window.assignments.pickFileForSlot(slotIndex);
-  // no-op if assignments module isn't available
-}
-
-async function assignFileToSlot(file, slotIndex) {
-  if (window.assignments && typeof window.assignments.assignFileToSlot === 'function') return window.assignments.assignFileToSlot(file, slotIndex);
-  // no-op fallback: assignments module not available
-}
-
-// Assign an existing decoded AudioBuffer to a slot (used when we have a buffer already)
-async function assignBufferToSlot(buffer, name, slotIndex) {
-  if (window.assignments && typeof window.assignments.assignBufferToSlot === 'function') return window.assignments.assignBufferToSlot(buffer, name, slotIndex);
-  // no-op fallback
-}
-
-
-
-function enableDragDropOnButton(btn, slotIndex) {
-  if (window.assignments && typeof window.assignments.enableDragDropOnButton === 'function') return window.assignments.enableDragDropOnButton(btn, slotIndex);
-  // no-op fallback
-}
-
-function enableFilePickerOnButton(btn, slotIndex) {
-  if (window.assignments && typeof window.assignments.enableFilePickerOnButton === 'function') return window.assignments.enableFilePickerOnButton(btn, slotIndex);
-  // no-op fallback
-}
 
 // recordings chooser implementation extracted to `js/choosers.js`
 
@@ -919,24 +700,40 @@ function showAddPresetMenu(anchorEl) {
       const buffers = new Array(steps).fill(null);
       const names = new Array(steps).fill('');
       selectedItems.slice(0,steps).forEach((it, i) => { buffers[i] = it.buffer; names[i] = it.name || `sound ${i+1}`; });
-      createPresetFromBuffers(`Local sampler ${Date.now()}`, buffers, names, 'buffers');
+      if (presetsModule && typeof presetsModule.createPresetFromBuffers === 'function') {
+        const res = presetsModule.createPresetFromBuffers(`Local sampler ${Date.now()}`, buffers, names, 'buffers');
+        if (res && res.opt) {
+          presetSelect.appendChild(res.opt);
+          const labelBtn = document.querySelector('.custom-select-btn .label'); if (labelBtn) labelBtn.textContent = res.opt.textContent;
+          presetSelect.value = res.opt.value; presetSelect.dispatchEvent(new Event('change'));
+        }
+      }
     }, { listRecordings, getRecording, decodeFileToBuffer, decodedItems: localBuffers.map((b) => ({ id: `local-${b.index}`, source: 'local', buffer: b.buffer, name: b.name, index: b.index })) }, undefined, { showLoadButton: false });
   }));
 
   container.appendChild(makeBtn('Slicer un enregistrement sur les silences', async () => {
-    // take the most recent recording, split it on silences and create a sampler
-    const recs = await listRecordings();
-    if (!recs || recs.length === 0) { showError('Aucun enregistrement trouvé.'); return; }
-    const r = recs.sort((a,b)=>b.created-a.created)[0];
-    const ent = await getRecording(r.id);
-    if (!ent || !ent.blob) { showError('Impossible de récupérer l’enregistrement.'); return; }
-    const file = new File([ent.blob], ent.name || `rec-${r.id}`, { type: ent.type || 'audio/webm' });
-    let buf;
-    try {
-      buf = await decodeFileToBuffer(file);
-    } catch (err) {
-      showError('Impossible de décoder l’enregistrement.');
-      return;
+    // Prefer the buffer currently loaded into the persistent actions preview,
+    // then the buffer shown in the waveform, then fall back to the most recent saved recording.
+    let buf = null;
+    const persistentActions = document.getElementById('persistentRecordingActions');
+    if (persistentActions && persistentActions._info && persistentActions._info.buffer) {
+      buf = persistentActions._info.buffer;
+    } else if (typeof currentShownBuffer !== 'undefined' && currentShownBuffer) {
+      buf = currentShownBuffer;
+    } else {
+      // fallback: take the most recent saved recording
+      const recs = await listRecordings();
+      if (!recs || recs.length === 0) { showError('Aucun enregistrement trouvé.'); return; }
+      const r = recs.sort((a,b)=>b.created-a.created)[0];
+      const ent = await getRecording(r.id);
+      if (!ent || !ent.blob) { showError('Impossible de récupérer l’enregistrement.'); return; }
+      const file = new File([ent.blob], ent.name || `rec-${r.id}`, { type: ent.type || 'audio/webm' });
+      try {
+        buf = await decodeFileToBuffer(file);
+      } catch (err) {
+        showError('Impossible de décoder l’enregistrement.');
+        return;
+      }
     }
 
     // helper: slice buffer on silence (uses global `ctx`)
@@ -1032,8 +829,18 @@ function showAddPresetMenu(anchorEl) {
       showError(`Trop de slices (${slices.length}), limité à ${maxSlots} premiers.`);
     }
 
-    const names = finalSlices.map((_, i) => `${file.name} ${i + 1}`);
-    createPresetFromBuffers(`Sliced sampler ${Date.now()}`, finalSlices, names, 'buffers');
+    // choose a sensible base name: prefer file.name (if we decoded from a File),
+    // then persistent actions name, then currently shown url, otherwise 'slice'
+    const baseName = (typeof file !== 'undefined' && file && file.name)
+      ? file.name
+      : (typeof persistentActions !== 'undefined' && persistentActions && persistentActions._info && persistentActions._info.name)
+        ? persistentActions._info.name
+        : (typeof currentShownUrl !== 'undefined' && currentShownUrl) ? currentShownUrl.split('/').pop() : 'slice';
+    const names = finalSlices.map((_, i) => `${baseName} ${i + 1}`);
+    if (presetsModule && typeof presetsModule.createPresetFromBuffers === 'function') {
+      const res = presetsModule.createPresetFromBuffers(`Sliced sampler ${Date.now()}`, finalSlices, names, 'buffers');
+      if (res && res.opt) { presetSelect.appendChild(res.opt); const labelBtn = document.querySelector('.custom-select-btn .label'); if (labelBtn) labelBtn.textContent = res.opt.textContent; presetSelect.value = res.opt.value; presetSelect.dispatchEvent(new Event('change')); }
+    }
   }));
 
   container.appendChild(makeBtn('Créer un sampler en pitchant le son', async () => {
@@ -1075,82 +882,14 @@ function showAddPresetMenu(anchorEl) {
     const rates = Array.from({length: steps}, (_,i) => min + (i/(steps-1))*(max-min));
     const buffers = new Array(steps).fill(null).map(() => buf);
     const names = rates.map((r,i) => `pitch ${Math.round(r*100)}%`);
-    createPresetFromBuffers(`Pitch sampler ${Date.now()}`, buffers, names, 'pitch', rates);
+    if (presetsModule && typeof presetsModule.createPresetFromBuffers === 'function') {
+      const res = presetsModule.createPresetFromBuffers(`Pitch sampler ${Date.now()}`, buffers, names, 'pitch', rates);
+      if (res && res.opt) { presetSelect.appendChild(res.opt); const labelBtn = document.querySelector('.custom-select-btn .label'); if (labelBtn) labelBtn.textContent = res.opt.textContent; presetSelect.value = res.opt.value; presetSelect.dispatchEvent(new Event('change')); }
+    }
   }));
 
   document.body.appendChild(container);
   setTimeout(() => document.addEventListener('click', (e) => { if (!container.contains(e.target)) container.remove(); }), 10);
 }
 
-function createPresetFromBuffers(name, buffers, names, type='buffers', pitchRates) {
-  const id = `gen-${Date.now()}`;
-  generatedPresetStore.set(id, { buffers, names, type, pitchRates });
-  // add to presets array as generated entry
-  presets.push({ name, generated: true, type, id });
-  // add option to UI
-  const opt = document.createElement('option');
-  opt.value = String(presets.length - 1);
-  opt.textContent = name;
-  presetSelect.appendChild(opt);
-  // update custom dropdown label if present
-  const labelBtn = document.querySelector('.custom-select-btn .label');
-  if (labelBtn) labelBtn.textContent = name;
-  // select new preset
-  presetSelect.value = opt.value;
-  presetSelect.dispatchEvent(new Event('change'));
-}
 
-async function loadGeneratedPreset(preset) {
-  const data = generatedPresetStore.get(preset.id);
-  if (!data) throw new Error('Generated preset not found');
-
-  // use buffers directly (some may be null)
-  decodedSounds = data.buffers.slice(0);
-
-  // Remap generated buffers the same way as presets: start at bottom-left
-  const mapping = [12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3];
-  const assignedBuffers = new Array(16).fill(null);
-  const assignedIndex = new Array(16).fill(null);
-  for (let p = 0; p < data.buffers.length && p < mapping.length; p++) {
-    assignedBuffers[mapping[p]] = data.buffers[p];
-    assignedIndex[mapping[p]] = p;
-  }
-
-  // build grid of buttons (reuse same logic as loadPresetByIndex but without decoding)
-  const totalSlots = KEYBOARD_KEYS.length || 16;
-  for (let i=0;i<totalSlots;i++) {
-    const btn = document.createElement('button');
-    const assignedKey = KEYBOARD_KEYS[i] || null;
-    if (assignedKey) btn.dataset.key = assignedKey;
-
-    const buffer = assignedBuffers[i];
-    const pIndex = assignedIndex[i];
-    const name = (typeof pIndex === 'number' && data.names && data.names[pIndex]) ? data.names[pIndex] : (buffer ? `sound ${i+1}` : '');
-    if (buffer) {
-      const soundNum = (typeof pIndex === 'number') ? (pIndex + 1) : (i + 1);
-      btn.textContent = `Play ${soundNum} — ${name}`;
-      const pseudoUrl = `generated:${preset.id}:${i}`;
-      trimPositions.set(pseudoUrl, { start: 0, end: buffer.duration });
-      btn.addEventListener('click', () => {
-        try { showWaveformForSound(buffer, pseudoUrl); } catch (e) { console.warn(e); }
-        if (ctx.state === 'suspended') ctx.resume();
-        let start = 0, end = buffer.duration;
-        const stored = trimPositions.get(pseudoUrl);
-        if (stored) { start = stored.start; end = stored.end; }
-        start = Math.max(0, Math.min(start, buffer.duration));
-        end = Math.max(start+0.01, Math.min(end, buffer.duration));
-        trimPositions.set(pseudoUrl, { start, end });
-        const rate = (data.type === 'pitch' && data.pitchRates && data.pitchRates[i]) ? data.pitchRates[i] : undefined;
-        if (typeof rate !== 'undefined') playSound(ctx, buffer, start, end, rate); else playSound(ctx, buffer, start, end);
-      });
-    } else {
-      btn.textContent = '';
-      btn.classList.add('empty-slot');
-    }
-
-    enableDragDropOnButton(btn, i);
-    enableFilePickerOnButton(btn, i);
-    buttonsContainer.appendChild(btn);
-    currentButtons.push(btn);
-  }
-}
