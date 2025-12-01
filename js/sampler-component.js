@@ -1,0 +1,350 @@
+import { initApp } from './main.js';
+
+class AudioSampler extends HTMLElement {
+  constructor() {
+    super();
+    this._shadow = this.attachShadow({ mode: 'closed' });
+  }
+
+  connectedCallback() {
+    // template: markup + inlined styles (copied from css/styles.css)
+    this._shadow.innerHTML = `
+      <style>
+/* --- inlined styles (from css/styles.css) --- */
+.wrapper {
+    position: relative;
+    width: 400px;
+    height: 300px;
+}
+
+/* center any fixed-size wrapper horizontally */
+.wrapper {
+  margin: 0 auto;
+}
+
+.wrapper canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+#myCanvas {
+  border: 3px solid black;
+  background-color:black;
+  z-index:0;
+}
+
+#myCanvasOverlay {
+  border:3px solid red;
+  position: absolute;
+  z-index:10;
+}
+
+#waveformContainer {
+  margin: 12px auto;
+  max-width: 800px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Buttons container: display a 4-column grid so buttons form a square layout */
+#buttonsContainer {
+  display: grid;
+  /* default: 2 columns on very small screens, grows via media queries */
+  grid-template-columns: repeat(2, 1fr);
+  gap: .25rem;
+  justify-items: stretch;
+  align-items: stretch;
+  margin: 0 auto;
+  max-width: 360px; /* reduced so cells are roughly half-size compared to previous */
+  width: 100%;
+}
+
+/* responsive breakpoints: 3 columns on medium, 4 on large */
+@media (min-width: 640px) {
+  #buttonsContainer { grid-template-columns: repeat(3, 1fr); max-width: 440px; }
+}
+@media (min-width: 1024px) {
+  #buttonsContainer { grid-template-columns: repeat(4, 1fr); max-width: 550px; }
+}
+
+/* center the page title */
+h1 {
+  text-align: center;
+  margin: 1rem 0;
+}
+
+/* center the topbar (preset select line) */
+#topbar { display: flex; gap: .75rem; align-items: center; justify-content: center; margin: .5rem auto 1rem; }
+.error { color: #b00020; }
+
+/* Square button design for dynamically created buttons */
+#buttonsContainer button {
+  /* Fill the grid cell and keep a square aspect ratio */
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.18rem 0.2rem; /* much smaller padding to shrink buttons */
+  margin: 0; /* spacing handled by grid gap */
+  border: 1px solid #cbd5e1; /* softer border for light theme */
+  background: linear-gradient(180deg, #ffffff, #f1f5f9);
+  color: #0b2a3a; /* dark text */
+  font-weight: 600;
+  /* fluid font-size: smaller on small screens, slightly larger on big screens */
+  font-size: clamp(0.56rem, 1.2vw, 0.8rem);
+  cursor: pointer;
+  border-radius: 8px;
+  box-shadow: 0 2px 3px rgba(16,24,40,0.04);
+  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+  text-align: center;
+  white-space: normal;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* Reduce gap and padding on very small screens to pack more buttons visibly */
+@media (max-width: 420px) {
+  #buttonsContainer { gap: 0.2rem; }
+  #buttonsContainer button { padding: 0.14rem; font-size: clamp(0.5rem, 3.2vw, 0.72rem); }
+}
+
+/* Key badge shown in the top-left of buttons when data-key is set */
+#buttonsContainer button {
+  position: relative; /* needed for absolute badge */
+}
+
+/* Empty slots: discrete styling (label stays subtle); assign-icon still used for adding files */
+#buttonsContainer button.empty-slot {
+  font-size: inherit;
+  font-weight: 600;
+  color: inherit;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  border: 1px dashed rgba(11,42,58,0.06);
+}
+
+#buttonsContainer button[data-key]::before {
+  content: attr(data-key);
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11,42,58,0.06);
+  color: #0b2a3a;
+  font-weight: 700;
+  font-size: 0.66rem;
+  line-height: 1;
+  border-radius: 4px;
+  border: 1px solid rgba(11,42,58,0.08);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  pointer-events: none; /* don't block clicks */
+}
+
+/* visual feedback when a key triggers a button */
+.keyboard-active {
+  transform: translateY(-2px) scale(0.99);
+  box-shadow: 0 6px 10px rgba(11,42,58,0.08) !important;
+}
+
+@media (max-width: 420px) {
+  #buttonsContainer button[data-key]::before { top: 4px; left: 4px; height: 16px; font-size: 0.58rem; padding: 0 3px; }
+}
+
+/* drag & drop visual */
+#buttonsContainer button.drag-over {
+  outline: 2px dashed rgba(11,42,58,0.18);
+  transform: translateY(-1px);
+}
+
+/* assigned-local small highlight */
+.assigned-local {
+  box-shadow: 0 6px 14px rgba(34,139,230,0.06) !important;
+}
+
+/* upload icon removed per user request */
+
+/* assign icon inside button (bottom-right) */
+#buttonsContainer button .assign-icon {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  border: none;
+  background: rgba(11,42,58,0.06);
+  color: #0b2a3a;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+#buttonsContainer button .assign-icon:hover { background: rgba(11,42,58,0.12); }
+
+#buttonsContainer button:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 20px rgba(16,24,40,0.08);
+  background: linear-gradient(180deg, #ffffff, #eef2ff);
+}
+
+#buttonsContainer button:active {
+  transform: translateY(0);
+  box-shadow: 0 4px 8px rgba(16,24,40,0.06);
+}
+
+/* Generic action button style (for UI buttons outside the sound grid) */
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem 0.6rem;
+  margin: 0.15rem;
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(180deg, #ffffff, #f1f5f9);
+  color: #0b2a3a;
+  font-weight: 600;
+  font-size: 0.86rem;
+  cursor: pointer;
+  border-radius: 8px;
+  box-shadow: 0 2px 3px rgba(16,24,40,0.04);
+  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+.action-btn:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(16,24,40,0.08); background: linear-gradient(180deg,#ffffff,#eef2ff); }
+.action-btn:active { transform: translateY(0); box-shadow: 0 4px 8px rgba(16,24,40,0.06); }
+
+/* record slot select removed — styles omitted */
+
+/* Recordings chooser container styling to match action buttons */
+#recordingsChooser {
+  border-radius: 10px;
+  /* same border/background as .action-btn / grid buttons */
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(180deg, #ffffff, #f1f5f9);
+  box-shadow: 0 2px 3px rgba(16,24,40,0.04);
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+#recordingsChooser .action-btn { font-size: 0.82rem; padding: 0.32rem 0.5rem; }
+
+/* make the Use / Del buttons less prominent but still styled */
+#recordingsChooser button { min-width: 44px; }
+
+/* Page background: light pastel gradient with subtle highlights */
+:host {
+  display: block;
+}
+:host > * { position: relative; z-index: 1; }
+
+body { background-color: transparent; }
+
+/* Also style the preset select similarly */
+#presetSelect {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(180deg,#ffffff,#f1f5f9);
+  box-shadow: 0 2px 3px rgba(16,24,40,0.04);
+  font-weight: 600;
+  color: #0b2a3a;
+}
+
+/* Last recording preview area */
+#lastRecordingContainer {
+  max-width: 800px;
+  margin: 0.5rem auto 1rem;
+}
+#lastRecordingCanvas {
+  width: 100%;
+  height: 80px;
+  display: block;
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(180deg,#ffffff,#f8fafc);
+  box-shadow: 0 2px 3px rgba(16,24,40,0.04);
+  border-radius: 8px;
+}
+
+/* Local sounds chooser */
+#localSoundsChooser {
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(180deg,#ffffff,#f1f5f9);
+  box-shadow: 0 2px 6px rgba(16,24,40,0.06);
+  padding: 10px;
+  /* responsive width: up to 720px, otherwise 90% of viewport */
+  width: min(720px, 90vw);
+}
+#localSoundsChooser:hover { transform: none; }
+#localSoundsChooser .action-btn { width: 84px; }
+#localSoundsChooser input[type="checkbox"] { transform: scale(1.1); }
+
+/* Custom preset dropdown (when opened) */
+.custom-select-wrapper { position: relative; display: inline-block; }
+.custom-select-btn { display: inline-flex; align-items: center; gap: 8px; }
+.custom-select-btn .caret { font-size: 0.8rem; opacity: 0.8; }
+/* position dropdown above other UI (bottom of wrapper) and ensure it's on top */
+#presetDropdown { position: absolute; left: 0; top: calc(100% + 8px); z-index: 2000; min-width: 200px; }
+/* preset items: continuous list with no gaps; rounded corners only on first/last */
+#presetDropdown .preset-item { display: flex; align-items: center; justify-content: flex-start; width: 100%; margin: 0; border-radius: 0; padding: 0.38rem 0.6rem; }
+#presetDropdown .preset-item + .preset-item { border-top: 1px solid rgba(11,42,58,0.04); }
+#presetDropdown .preset-item:first-child { border-top-left-radius: 8px; border-top-right-radius: 8px; }
+#presetDropdown .preset-item:last-child { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+/* --- end inlined styles --- */
+      </style>
+
+      <div id="component-root">
+        <h1>Sampler</h1>
+
+        <div id="topbar">
+          <label for="presetSelect">Preset:</label>
+          <select id="presetSelect" class="action-btn" disabled>
+            <option>Loading presets…</option>
+          </select>
+          <span id="status"></span>
+        </div>
+
+        <div id="recorderBar" style="display:flex; gap:.75rem; align-items:center; justify-content:center; margin-bottom: .75rem;">
+          <button id="addPresetBtn" class="action-btn" type="button">Ajouter un preset</button>
+          <button id="recordBtn" class="action-btn" type="button">Enregistrer avec le micro</button>
+          <span id="recordStatus" style="margin-left:.6rem;color:#b00020"></span>
+        </div>
+
+        <div id="lastRecordingContainer" style="text-align:center; margin-bottom: .75rem;">
+          <div id="lastRecordingLabel" style="font-weight:600; margin-bottom:6px;">Dernier enregistrement</div>
+          <canvas id="lastRecordingCanvas" width="600" height="80" style="max-width:100%; height:80px; border-radius:8px;"></canvas>
+        </div>
+
+        <div id="buttonsContainer"></div>
+
+        <p class="error" id="error"></p>
+        <input id="filePicker" type="file" accept="audio/*" style="display:none" />
+      </div>
+    `;
+
+    // initialize the app inside the shadow root
+    // initApp expects a root-like object with querySelector; ShadowRoot fits that role
+    try {
+      initApp(this._shadow);
+    } catch (err) {
+      // initialization errors should not break host page
+      // create a visible error message inside the shadow root
+      const errEl = this._shadow.querySelector('#error');
+      if (errEl) errEl.textContent = 'Erreur initialisation: ' + (err && err.message ? err.message : String(err));
+      console.error('AudioSampler init error', err);
+    }
+  }
+}
+
+customElements.define('audio-sampler', AudioSampler);
+
+export default AudioSampler;

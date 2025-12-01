@@ -18,13 +18,14 @@ const PRESETS_URL = `${API_BASE}/api/presets`;
 
 // Web Audio
 let ctx;
-
-// UI
-const presetSelect = document.getElementById('presetSelect');
-const buttonsContainer = document.getElementById('buttonsContainer');
-const statusEl = document.getElementById('status');
-const errorEl = document.getElementById('error');
-const lastRecordingCanvas = document.getElementById('lastRecordingCanvas');
+// UI (will be bound to a root inside initApp)
+let rootEl = null;
+let presetSelect;
+let buttonsContainer;
+let statusEl;
+let errorEl;
+let lastRecordingCanvas;
+let filePicker;
 
 // Etat
 let presets = [];          // [{ name, files:[absoluteUrl,...] }, ...]
@@ -55,8 +56,17 @@ let currentShownBuffer = null;
 let currentShownUrl = null;
 let showWaveformForSound;
 
-window.onload = async function init() {
+export async function initApp(root) {
+  rootEl = root || document;
   ctx = new AudioContext();
+
+  // bind UI nodes from root
+  presetSelect = rootEl.querySelector('#presetSelect');
+  buttonsContainer = rootEl.querySelector('#buttonsContainer');
+  statusEl = rootEl.querySelector('#status');
+  errorEl = rootEl.querySelector('#error');
+  lastRecordingCanvas = rootEl.querySelector('#lastRecordingCanvas');
+  filePicker = rootEl.querySelector('#filePicker');
 
   // expose a simple playSound helper globally so choosers can preview sounds
   window.playSound = (buffer) => {
@@ -100,7 +110,7 @@ window.onload = async function init() {
       KEYBOARD_KEYS,
       trimPositions,
       playSound: (buffer, s, e, r) => playSound(ctx, buffer, s, e, r),
-      filePicker: document.getElementById('filePicker'),
+      filePicker,
       showRecordingsChooser,
       listRecordings,
       getRecording,
@@ -152,7 +162,7 @@ window.onload = async function init() {
       showStatus
     });
     uiPresets.createCustomPresetDropdown();
-    const addPresetBtn = document.getElementById('addPresetBtn');
+    const addPresetBtn = rootEl.querySelector('#addPresetBtn');
     if (addPresetBtn) addPresetBtn.addEventListener('click', (e) => { e.stopPropagation(); uiPresets.showAddPresetMenu(addPresetBtn); });
     // enable select now
     presetSelect.disabled = false;
@@ -163,10 +173,10 @@ window.onload = async function init() {
 
     // 4) Changement de preset
     // keep native select change handler for programmatic changes
-    presetSelect.addEventListener('change', async () => {
+    if (presetSelect) presetSelect.addEventListener('change', async () => {
       const idx = Number(presetSelect.value);
       // update custom UI label if present
-      const labelBtn = document.querySelector('.custom-select-btn .label');
+      const labelBtn = rootEl.querySelector('.custom-select-btn .label');
         if (labelBtn && presetSelect.options && presetSelect.options[idx]) labelBtn.textContent = presetSelect.options[idx].textContent;
         if (presetsModule && typeof presetsModule.loadPresetByIndex === 'function') await presetsModule.loadPresetByIndex(idx);
     });
@@ -175,8 +185,8 @@ window.onload = async function init() {
     window.addEventListener('keydown', onGlobalKeyDown);
 
     // Recorder UI: wire record button and status via recorder module
-    const recordBtn = document.getElementById('recordBtn');
-    const recordStatus = document.getElementById('recordStatus');
+    const recordBtn = rootEl.querySelector('#recordBtn');
+    const recordStatus = rootEl.querySelector('#recordStatus');
 
     const recorder = initRecorder({
       decodeFileToBuffer,
@@ -206,12 +216,12 @@ window.onload = async function init() {
     console.error(err);
     showError(err.message || String(err));
   }
-};
+}
 
 
 // create persistent actions UI under #lastRecordingContainer so buttons are visible from start
 function createPersistentRecordingActions() {
-  const container = document.getElementById('lastRecordingContainer');
+  const container = rootEl ? rootEl.querySelector('#lastRecordingContainer') : document.getElementById('lastRecordingContainer');
   if (!container) return;
   // ensure position relative for absolute left play
   if (!container.style.position) container.style.position = 'relative';
@@ -349,6 +359,7 @@ function createPersistentRecordingActions() {
 // ---------- UI helpers ----------
 
 function fillPresetSelect(presets) {
+  if (!presetSelect) return;
   presetSelect.innerHTML = '';
   presets.forEach((p, i) => {
     const opt = document.createElement('option');
@@ -375,8 +386,8 @@ function showRecordingActions(anchorContainer, info) {
   // info: { buffer, file, blob, name }
   if (!anchorContainer) return;
   // if persistent UI exists, update it instead of creating transient actions
-  const persistent = document.getElementById('persistentRecordingActions');
-  const leftPersistent = document.getElementById('persistentRecordingPlayLeft');
+  const persistent = rootEl ? rootEl.querySelector('#persistentRecordingActions') : document.getElementById('persistentRecordingActions');
+  const leftPersistent = rootEl ? rootEl.querySelector('#persistentRecordingPlayLeft') : document.getElementById('persistentRecordingPlayLeft');
   if (persistent && leftPersistent) {
     persistent._info = info;
     const hasBlobOrBuffer = !!(info && (info.buffer || info.blob || info.file));
@@ -564,8 +575,6 @@ function onGlobalKeyDown(e) {
 
 
 // --- Import / Drag & Drop helpers ---
-
-const filePicker = document.getElementById('filePicker');
 
 async function decodeFileToBuffer(file) {
   const arrayBuffer = await file.arrayBuffer();
