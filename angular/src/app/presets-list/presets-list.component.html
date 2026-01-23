@@ -1,0 +1,13 @@
+<div class="example-flex-container">
+  <div *ngIf="loading">Loading…</div>
+  <div *ngIf="error" style="color:red">{{error}}</div>
+
+  <section *ngFor="let p of presets" class="preset-row">
+    <div class="example-label">{{ p.name }}</div>
+    <div class="example-button-row">
+      <button class="action" (click)="rename(p)">Rename</button>
+    </div>
+  </section>
+
+  <div *ngIf="!loading && presets.length === 0">No presets found.</div>
+</div>

@@ -1,0 +1,59 @@
+/* Container holding all presets */
+.example-flex-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+/* Each preset row */
+section.preset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.example-label {
+  font-size: 14px;
+  margin: 0 16px 0 8px;
+  min-width: 160px;
+  font-weight: 600;
+  color: #222;
+}
+
+.example-button-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* generic action button */
+.example-button-row .action {
+  padding: 6px 10px;
+  border: 1px solid #bbb;
+  background: #f6f6f6;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.example-button-row .action:hover {
+  background: #eef3ff;
+  border-color: #8aa0ff;
+}
+
+/* small secondary button */
+.action.secondary {
+  background: #fff;
+  border-color: #ddd;
+}
+
+/* responsive */
+@media (max-width: 640px) {
+  section.preset-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .example-label { min-width: 0; }
+  .example-button-row { justify-content: flex-end; }
+}
