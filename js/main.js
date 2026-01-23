@@ -1,6 +1,6 @@
 // Corrigé pour Live Server + API sur http://localhost:3000
 
-import { loadAndDecodeSound, playSound } from './soundutils.js';
+import { loadAndDecodeSound, loadAndDecodeSoundWithProgress, playSound } from './soundutils.js';
 import { pixelToSeconds } from './utils.js';
 import { saveRecording, listRecordings, getRecording, deleteRecording } from './indexeddb.js';
 import { mkBtn, mkEl, placePopupNear, makeListRow } from './ui-helpers.js';
@@ -126,6 +126,7 @@ export async function initApp(root) {
     presetsModule = initPresets({
       API_BASE,
       loadAndDecodeSound: (url) => loadAndDecodeSound(url, ctx),
+      loadAndDecodeWithProgress: (url, onProgress) => loadAndDecodeSoundWithProgress(url, ctx, onProgress),
       buttonsContainer,
       KEYBOARD_KEYS,
       playSound: (buffer, s, e, r) => playSound(ctx, buffer, s, e, r),
