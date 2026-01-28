@@ -4,6 +4,7 @@ export function initPresets(deps = {}) {
   const {
     API_BASE,
     loadAndDecodeSound,
+    loadAndDecodeWithProgress,
     buttonsContainer,
     KEYBOARD_KEYS,
     playSound,
@@ -137,48 +138,68 @@ export function initPresets(deps = {}) {
 
     showStatus(`Loading ${preset.files.length} file(s)…`);
     try {
-      const decodedSounds = await Promise.all(preset.files.map(url => loadAndDecodeSound(url)));
-      lastDecodedSounds = decodedSounds.slice(0);
       const mapping = [12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3];
-      const assignedDecoded = new Array(16).fill(null);
-      const assignedUrls = new Array(16).fill(null);
-      const assignedIndex = new Array(16).fill(null);
-      for (let p = 0; p < decodedSounds.length && p < mapping.length; p++) {
-        const target = mapping[p];
-        assignedDecoded[target] = decodedSounds[p];
-        assignedUrls[target] = preset.files[p];
-        assignedIndex[target] = p;
-      }
-
       const totalSlots = KEYBOARD_KEYS.length || 16;
+      lastDecodedSounds = [];
+      // Pre-create grid with loading placeholders and per-sound progress bars
+      const slotButtons = new Array(totalSlots).fill(null);
+      const loadPromises = [];
       for (let i = 0; i < totalSlots; i++) {
         const btn = document.createElement('button');
+        slotButtons[i] = btn;
         const assignedKey = KEYBOARD_KEYS[i] || null;
         if (assignedKey) btn.dataset.key = assignedKey;
+        // Determine if this slot maps to a file in the preset
+        const mapIndex = mapping.indexOf(i);
+        const hasFile = mapIndex !== -1 && mapIndex < preset.files.length;
+        if (hasFile) {
+          const url = preset.files[mapIndex];
+          const name = (url && url.split('/').pop()) || `sound ${mapIndex + 1}`;
+          const soundNum = mapIndex + 1;
+          btn.textContent = `Loading ${soundNum} — ${name}`;
+          // Progress bar element
+          const prog = document.createElement('progress');
+          prog.value = 0; prog.max = 1;
+          prog.style.display = 'block';
+          prog.style.width = '100%';
+          prog.style.marginTop = '6px';
+          btn.appendChild(prog);
 
-        const decodedSound = assignedDecoded[i];
-        const url = assignedUrls[i];
+          // Start loading with progress if available
+          const loader = (typeof loadAndDecodeWithProgress === 'function')
+            ? loadAndDecodeWithProgress(url, (loaded, total) => { try { if (total > 0) { prog.max = total; prog.value = loaded; } else { prog.removeAttribute('value'); } } catch(_){} })
+            : loadAndDecodeSound(url);
 
-        if (decodedSound) {
-          const name = (url && url.split('/').pop()) || `sound ${i + 1}`;
-          const soundNum = (assignedIndex[i] !== null && typeof assignedIndex[i] !== 'undefined') ? (assignedIndex[i] + 1) : (i + 1);
-          btn.textContent = `Play ${soundNum} — ${name}`;
-          btn.addEventListener('click', () => {
-            try { showWaveformForSound(decodedSound, url); } catch (err) { console.warn('Unable to show waveform', err); }
-            try { if (window && window.ctx && window.ctx.state === 'suspended') window.ctx.resume(); } catch (e) {}
-            let start = 0; let end = decodedSound.duration;
-            const stored = trimPositions.get(url);
-            if (stored) { start = stored.start; end = stored.end; }
-            else if (trimbarsDrawer && waveformCanvas) {
-              const l = trimbarsDrawer.leftTrimBar.x; const r = trimbarsDrawer.rightTrimBar.x;
-              start = pixelToSeconds(l, decodedSound.duration, waveformCanvas.width);
-              end = pixelToSeconds(r, decodedSound.duration, waveformCanvas.width);
-            }
-            start = Math.max(0, Math.min(start, decodedSound.duration));
-            end = Math.max(start + 0.01, Math.min(end, decodedSound.duration));
-            trimPositions.set(url, { start, end });
-            playSound(decodedSound, start, end);
+          const p = Promise.resolve(loader).then((decodedSound) => {
+            // Remove progress bar and finalize button
+            try { prog.remove(); } catch(_){}
+            btn.textContent = `Play ${soundNum} — ${name}`;
+            // store decoded sound in the correct mapping position
+            lastDecodedSounds[mapIndex] = decodedSound;
+            // initialize trim for this url
+            trimPositions.set(url, { start: 0, end: decodedSound.duration });
+            btn.addEventListener('click', () => {
+              try { showWaveformForSound(decodedSound, url); } catch (err) { console.warn('Unable to show waveform', err); }
+              try { if (window && window.ctx && window.ctx.state === 'suspended') window.ctx.resume(); } catch (e) {}
+              let start = 0; let end = decodedSound.duration;
+              const stored = trimPositions.get(url);
+              if (stored) { start = stored.start; end = stored.end; }
+              else if (trimbarsDrawer && waveformCanvas) {
+                const l = trimbarsDrawer.leftTrimBar.x; const r = trimbarsDrawer.rightTrimBar.x;
+                start = pixelToSeconds(l, decodedSound.duration, waveformCanvas.width);
+                end = pixelToSeconds(r, decodedSound.duration, waveformCanvas.width);
+              }
+              start = Math.max(0, Math.min(start, decodedSound.duration));
+              end = Math.max(start + 0.01, Math.min(end, decodedSound.duration));
+              trimPositions.set(url, { start, end });
+              playSound(decodedSound, start, end);
+            });
+          }).catch((err) => {
+            console.error('Load error for', url, err);
+            btn.classList.add('empty-slot');
+            btn.textContent = '';
           });
+          loadPromises.push(p);
         } else {
           btn.textContent = '';
           btn.classList.add('empty-slot');
@@ -187,13 +208,12 @@ export function initPresets(deps = {}) {
 
         if (assignments && typeof assignments.enableDragDropOnButton === 'function') assignments.enableDragDropOnButton(btn, i);
         if (assignments && typeof assignments.enableFilePickerOnButton === 'function') assignments.enableFilePickerOnButton(btn, i);
-
         buttonsContainer.appendChild(btn);
-        // keep main's currentButtons in sync so assignments.replace logic finds the node
         if (assignments && typeof assignments.setCurrentButton === 'function') assignments.setCurrentButton(i, btn);
       }
 
-      showStatus(`Loaded preset: ${preset.name} (${decodedSounds.length} sounds)`);
+      await Promise.all(loadPromises);
+      showStatus(`Loaded preset: ${preset.name} (${(lastDecodedSounds.filter(Boolean)).length} sounds)`);
     } catch (err) { console.error(err); showError(`Erreur lors du chargement du preset "${preset.name}": ${err.message || err}`); }
   }
 

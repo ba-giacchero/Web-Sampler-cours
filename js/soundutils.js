@@ -54,3 +54,37 @@ async function loadAndDecodeSound(url, ctx) {
   
   // export the function
   export { loadAndDecodeSound, playSound };
+
+  // XMLHttpRequest-based loader with progress callback (like ExempleASupprimer)
+  // onProgress: (loadedBytes, totalBytes) => void
+  export function loadAndDecodeSoundWithProgress(url, ctx, onProgress) {
+    return new Promise((resolve, reject) => {
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.responseType = 'arraybuffer';
+        xhr.onprogress = (e) => {
+          try {
+            if (typeof onProgress === 'function' && e && typeof e.loaded === 'number') {
+              onProgress(e.loaded, e.total || 0);
+            }
+          } catch (_) {}
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              ctx.decodeAudioData(xhr.response).then((buffer) => {
+                resolve(buffer);
+              }).catch((err) => {
+                reject(err);
+              });
+            } catch (err) { reject(err); }
+          } else {
+            reject(new Error(`HTTP ${xhr.status} while loading ${url}`));
+          }
+        };
+        xhr.onerror = () => reject(new Error('XHR error while loading ' + url));
+        xhr.send();
+      } catch (err) { reject(err); }
+    });
+  }
