@@ -27,17 +27,29 @@ body{
 header.app-header{
 	display:flex;
 	align-items:center;
-	justify-content:center;
-	flex-direction:column;
-	gap:6px;
+	justify-content:center; /* center the title horizontally within the container */
 	margin-bottom:18px;
+	position:relative; /* allow absolute positioning for status */
+	/* span the full width of the parent container (.app-shell) */
+	width:100%;
+	box-sizing:border-box;
+	padding: 8px 12px;
 }
 
 header.app-header h1{
 	font-size:20px;
 	margin:0;
 	font-weight:600;
-	text-align:center;
+}
+
+/* keep the small status text pinned to the right while title stays centered */
+.app-header .muted{
+	position:absolute;
+	right:12px;
+	top:50%;
+	transform:translateY(-50%);
+	font-size:13px;
+	color:var(--muted);
 }
 
 .card{
@@ -77,7 +89,7 @@ section.preset-row{
 .action:hover{background:rgba(37,99,235,0.06)}
 .action.secondary{color:var(--muted);border-style:dashed}
 
-.muted{color:var(--muted);font-size:13px;text-align:center}
+.muted{color:var(--muted);font-size:13px}
 
 @media (max-width:640px){
 	.app-shell{padding:12px;margin:12px}

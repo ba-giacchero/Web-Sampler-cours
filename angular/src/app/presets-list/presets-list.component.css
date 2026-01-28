@@ -57,3 +57,8 @@ section.preset-row {
   .example-label { min-width: 0; }
   .example-button-row { justify-content: flex-end; }
 }
+
+.footer-actions {
+  margin-top: 16px;
+  text-align: right;
+}

@@ -30,4 +30,12 @@ export class PresetsListComponent implements OnInit {
     if (!n || n.trim() === '' || n === p.name) return;
     this.svc.rename(p.name, n).subscribe({ next: () => this.load(), error: (e) => alert('Erreur: '+(e?.message||e)) });
   }
+
+  delete(p: Preset) {
+    if (!confirm(`Supprimer le preset "${p.name}" ?`)) return;
+    this.svc.delete(p.name).subscribe({
+      next: () => this.load(),
+      error: (e) => alert('Erreur lors de la suppression: ' + (e?.message || e))
+    });
+  }
 }

@@ -3,10 +3,29 @@ import { HttpClient } from '@angular/common/http';
 import { environment } from '../environments/environment';
 import { Observable } from 'rxjs';
 
+export interface PresetSample {
+  url: string;
+  name: string;
+}
+
 export interface Preset {
   name: string;
+  type?: string;
+  isFactoryPresets?: boolean;
   files?: string[];
-  samples?: any[];
+  samples?: PresetSample[];
+}
+
+export interface UploadFileInfo {
+  originalName: string;
+  storedName: string;
+  size: number;
+  url: string;
+}
+
+export interface UploadResponse {
+  uploaded: number;
+  files: UploadFileInfo[];
 }
 
 @Injectable({ providedIn: 'root' })
@@ -28,5 +47,16 @@ export class PresetsService {
 
   delete(name: string) {
     return this.http.delete(`${this.base}/api/presets/${encodeURIComponent(name)}`);
+  }
+
+  upload(folder: string, files: File[]): Observable<UploadResponse> {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file);
+    }
+    return this.http.post<UploadResponse>(
+      `${this.base}/api/upload/${encodeURIComponent(folder)}`,
+      formData
+    );
   }
 }

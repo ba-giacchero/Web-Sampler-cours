@@ -47,9 +47,10 @@ export function initPresets(deps = {}) {
         } else if (Array.isArray(preset.urls)) {
           files = preset.urls.map(makeAbsFromApi);
         }
-
+        // keep presets even if they have no files yet so they appear
+        // in the sampler list (they will just create empty pads)
         return { name: preset.name || preset.title || `Preset ${i + 1}`, files };
-      }).filter(p => p.files.length > 0);
+      }).filter(p => Array.isArray(p.files));
     }
 
     if (raw && Array.isArray(raw.presets)) return normalizePresets(raw.presets);

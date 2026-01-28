@@ -6,8 +6,8 @@
     <div class="example-label">{{ p.name }}</div>
     <div class="example-button-row">
       <button class="action" (click)="rename(p)">Rename</button>
+      <button class="action secondary" (click)="delete(p)">Delete</button>
     </div>
   </section>
-
-  <div *ngIf="!loading && presets.length === 0">No presets found.</div>
+<button class="action" routerLink="/createsampler">Créer un preset vide</button>
 </div>
