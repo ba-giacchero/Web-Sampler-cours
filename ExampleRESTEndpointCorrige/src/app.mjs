@@ -17,13 +17,20 @@ import {
 export const app = express();
 app.use(express.json({ limit: "2mb" }));
 
+// CORS configuration: allow local dev + deployed Angular app on Vercel
+const allowedOrigins = [
+  /^http:\/\/(localhost|127\.0\.0\.1)(:\\d+)?$/i,
+  /^https:\/\/web-sampler-cours\.vercel\.app$/i,
+];
 
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true); // allow non-browser clients like curl or Postman
-    const ok = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+    const ok = allowedOrigins.some((rule) =>
+      rule instanceof RegExp ? rule.test(origin) : rule === origin
+    );
     cb(ok ? null : new Error("Not allowed by CORS"), ok);
-  }, // allow all origins for testing; in production, specify allowed origins
+  },
 }));
 
 
