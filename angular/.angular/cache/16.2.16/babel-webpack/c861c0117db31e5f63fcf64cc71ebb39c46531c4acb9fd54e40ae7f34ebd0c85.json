@@ -1,0 +1,1 @@
+{"ast":null,"code":"export const environment = {\n  production: false,\n  apiBase: 'https://web-sampler-cours.onrender.com'\n};","map":null,"metadata":{},"sourceType":"module","externalDependencies":[]}
