@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 import { Router } from '@angular/router';
 import { PresetsService, Preset, PresetSample, UploadResponse } from '../presets.service';
-import { environment } from '../../environments/environment';
+import { appendAudioFiles, buildSamplesFromUpload, buildSamplesFromUrls, validateUrlSamples } from '../preset-audio-utils';
 
 @Component({
   selector: 'app-create-sampler',
@@ -27,13 +27,10 @@ export class CreateSamplerComponent {
     }
 
     if (!selected.length) { return; }
-
-    const combined = [...this.files, ...selected];
-    if (combined.length > 16) {
-      this.files = combined.slice(0, 16);
+    const { files, truncated } = appendAudioFiles(this.files, selected, 16);
+    this.files = files;
+    if (truncated) {
       alert('Maximum 16 fichiers audio par preset. Les fichiers supplémentaires ont été ignorés.');
-    } else {
-      this.files = combined;
     }
   }
 
@@ -59,13 +56,10 @@ export class CreateSamplerComponent {
       }
     }
     if (!droppedFiles.length) { return; }
-
-    const combined = [...this.files, ...droppedFiles];
-    if (combined.length > 16) {
-      this.files = combined.slice(0, 16);
+    const { files, truncated } = appendAudioFiles(this.files, droppedFiles, 16);
+    this.files = files;
+    if (truncated) {
       alert('Maximum 16 fichiers audio par preset. Les fichiers supplémentaires ont été ignorés.');
-    } else {
-      this.files = combined;
     }
   }
 
@@ -74,60 +68,15 @@ export class CreateSamplerComponent {
     this.files = [...this.files];
   }
 
-  private async isValidAudioUrl(rawUrl: string): Promise<boolean> {
-    let url = (rawUrl || '').trim();
-    if (!url) return false;
-
-    // Si ce n'est pas une URL absolue, on la traite comme un chemin relatif au dossier /presets du back
-    if (!/^https?:\/\//i.test(url)) {
-      const cleaned = url.replace(/^\.?\//, '');
-      url = `${environment.apiBase}/presets/${cleaned}`;
-    }
-
-    try {
-      const res = await fetch(url, { method: 'HEAD' });
-      if (!res.ok) return false;
-      const ct = (res.headers.get('content-type') || '').toLowerCase();
-      return ct.startsWith('audio/') || ct.includes('octet-stream');
-    } catch {
-      return false;
-    }
-  }
-
-  private async validateUrlSamples(samples: PresetSample[]): Promise<string | null> {
-    for (const s of samples) {
-      const ok = await this.isValidAudioUrl(s.url);
-      if (!ok) return s.url;
-    }
-    return null;
-  }
-
-  private buildSamplesFromUrls(urls: string[]): PresetSample[] {
-    return urls.map(u => {
-      const trimmed = u.trim();
-      const baseName = trimmed.split(/[\\/]/).pop() || 'sample';
-      return { name: baseName, url: trimmed };
-    });
-  }
-
-  private buildSamplesFromUpload(name: string, upload: UploadResponse): PresetSample[] {
-    return (upload.files || []).map(f => {
-      const baseName = (f.originalName || '').split(/[\\/]/).pop() || f.storedName || 'sample';
-      return {
-        name: baseName,
-        url: `./${name}/${f.storedName}`
-      };
-    });
-  }
-
   createPreset() {
+    // on recupère et valide le nom
     const rawName = (this.name || '').trim();
     if (!rawName) {
       alert('Veuillez saisir un nom de preset.');
       return;
     }
     const name = rawName;
-
+    // on recupère les URLs une par une
     const manualUrls = (this.urlText || '')
       .split(/\r?\n/)
       .map(l => l.trim())
@@ -137,6 +86,7 @@ export class CreateSamplerComponent {
 
     this.svc.list().subscribe({
       next: async (presets: Preset[]) => {
+        //on verifie que le nom n'existe pas déjà
         const exists = (presets || []).some(p => (p.name || '').toLowerCase() === name.toLowerCase());
         if (exists) {
           alert('Un preset avec ce nom existe déjà.');
@@ -145,11 +95,11 @@ export class CreateSamplerComponent {
         }
 
         const hasFiles = this.files && this.files.length > 0;
-        const urlSamples = this.buildSamplesFromUrls(manualUrls);
+        const urlSamples = buildSamplesFromUrls(manualUrls);
 
         // Si des URLs sont fournies, on vérifie qu'elles pointent bien vers des fichiers audio accessibles
         if (urlSamples.length) {
-          const invalidUrl = await this.validateUrlSamples(urlSamples);
+          const invalidUrl = await validateUrlSamples(urlSamples);
           if (invalidUrl) {
             alert(`Impossible de créer le preset : l'URL "${invalidUrl}" ne pointe pas vers un fichier audio valide sur le serveur.`);
             this.loading = false;
@@ -212,7 +162,7 @@ export class CreateSamplerComponent {
         // Cas 3: on a des fichiers (avec potentiellement des URL en plus)
         this.svc.upload(name, this.files).subscribe({
           next: (uploadRes) => {
-            const fileSamples = this.buildSamplesFromUpload(name, uploadRes);
+            const fileSamples = buildSamplesFromUpload(name, uploadRes);
             let allSamples: PresetSample[] = [...fileSamples, ...urlSamples];
             if (allSamples.length > 16) {
               allSamples = allSamples.slice(0, 16);

@@ -49,6 +49,14 @@ export class PresetsService {
     return this.http.delete(`${this.base}/api/presets/${encodeURIComponent(name)}`);
   }
 
+  getOne(name: string): Observable<Preset> {
+    return this.http.get<Preset>(`${this.base}/api/presets/${encodeURIComponent(name)}`);
+  }
+
+  update(oldName: string, preset: Preset) {
+    return this.http.put(`${this.base}/api/presets/${encodeURIComponent(oldName)}`, preset);
+  }
+
   upload(folder: string, files: File[]): Observable<UploadResponse> {
     const formData = new FormData();
     for (const file of files) {

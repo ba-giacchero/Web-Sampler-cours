@@ -1,0 +1,81 @@
+<div class="example-flex-container">
+  <h2>Modifier le preset</h2>
+
+  <label class="field-label" for="preset-name">Nom du preset</label>
+  <input
+    id="preset-name"
+    type="text"
+    [(ngModel)]="name"
+    placeholder="Nom du preset"
+  />
+
+  <h3>Sons existants</h3>
+  <ng-container *ngIf="existingSamples.length; else noSamples">
+    <ul class="file-list">
+      <li *ngFor="let s of existingSamples; let i = index">
+        <div class="file-info">
+          <strong>{{ s.name || ('Son ' + (i + 1)) }}</strong>
+          <small class="muted">{{ s.url }}</small>
+        </div>
+        <button type="button" class="chip-remove" (click)="removeExistingSample(i)">✕</button>
+      </li>
+    </ul>
+  </ng-container>
+  <ng-template #noSamples>
+    <p class="muted">Aucun son pour ce preset.</p>
+  </ng-template>
+
+  <label class="field-label" for="preset-urls">Nouvelles URLs de sons (une par ligne, optionnel)</label>
+  <textarea
+    id="preset-urls"
+    rows="3"
+    [(ngModel)]="urlText"
+    placeholder="Ex: ./MonPreset/nouveau-kick.wav"
+  ></textarea>
+
+  <div
+    class="drop-zone"
+    [class.over]="isDragOver"
+    (drop)="onDrop($event)"
+    (dragover)="onDragOver($event)"
+    (dragleave)="onDragLeave($event)"
+  >
+    <p>Ajouter de nouveaux fichiers audio</p>
+    <p class="muted">Glissez-déposez ici ou</p>
+    <button
+      type="button"
+      class="action secondary"
+      (click)="fileInput.click()"
+    >
+      Parcourir le PC…
+    </button>
+    <input
+      #fileInput
+      type="file"
+      multiple
+      accept="audio/*"
+      (change)="onFileSelected($event)"
+      hidden
+    />
+  </div>
+
+  <ul *ngIf="files.length" class="file-list">
+    <li *ngFor="let file of files; let i = index">
+      <span>{{ file.name }}</span>
+      <button type="button" class="chip-remove" (click)="removeNewFile(i)">
+        ✕
+      </button>
+    </li>
+  </ul>
+
+  <div class="example-button-row">
+    <button class="action" (click)="save()" [disabled]="loading">
+      Enregistrer les modifications
+    </button>
+    <button class="action secondary" routerLink="/" [disabled]="loading">
+      Annuler
+    </button>
+  </div>
+
+  <div *ngIf="loading" class="muted">Sauvegarde en cours…</div>
+</div>
