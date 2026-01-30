@@ -28,8 +28,6 @@ Pour la partie Angular les prompts majeurs sont:
 
 « Fais un mapping entre les exigences du sujet et les fichiers/fonctions de mon projet actuel, et dis-moi ce qui manque. »
 
-« Crée pour moi un mini projet Angular dans ce repo, qui liste les presets à partir de l’API existante /api/presets. »
-
 « Configure Angular pour communiquer avec mon back-end sur http://localhost:3000, qui lui mme utilise CORS»
 
 « Empêche la création d’un preset si une des URLs ne pointe pas vers un fichier audio valide sur mon back-end. »
@@ -38,11 +36,7 @@ Pour la partie Angular les prompts majeurs sont:
 
 « Mutualise toute la logique d’upload et de validation d’URLs dans un utilitaire partagé pour éviter la duplication entre composants. »
 
-« Implémente la mise à jour complète d’un preset via PUT /api/presets/:name côté Angular, en conservant type et isFactoryPresets. »
-
 « Explique moi les messages d’erreur Angular pour les opérations sur les presets »
-
-« Ajoute des indicateurs de chargement (spinners/texte) pour toutes les requêtes HTTP liées aux presets. »
 
 « Identifie le code dupliqué entre CreateSamplerComponent et ModifySamplerComponent et propose un refactoring propre. »
 
