@@ -30,12 +30,13 @@ export function buildSamplesFromUpload(folderName: string, upload: UploadRespons
 export async function isValidAudioUrl(rawUrl: string): Promise<boolean> {
   let url = (rawUrl || '').trim();
   if (!url) return false;
-
+  // Si l'URL n'est pas absolue, on la complète avec la base de l'API
   if (!/^https?:\/\//i.test(url)) {
     const cleaned = url.replace(/^\.?\//, '');
     url = `${environment.apiBase}/presets/${cleaned}`;
   }
-
+  // On fait une requête HEAD pour vérifier le type de contenu
+  //si ce n'est pas ok ou pas audio on retourne false
   try {
     const res = await fetch(url, { method: 'HEAD' });
     if (!res.ok) return false;
