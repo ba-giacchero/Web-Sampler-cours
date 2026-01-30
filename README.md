@@ -20,7 +20,10 @@ pour les parties récente du FRONT-END (sampler) les prompts majeurs sont:
 
 -dans le dossier contexte je t'ai donné un exemple du cours de barre de progression, explique en détail ligne par ligne son fonctionnement
 
-pour la partie Angular les prompts majeurs sont:
+
+
+Pour la partie Angular les prompts majeurs sont:
+
 « Analyse tout le code du sampler et explique-moi comment les presets sont chargés depuis l’API et appliqués aux pads. »
 
 « Fais un mapping entre les exigences du sujet et les fichiers/fonctions de mon projet actuel, et dis-moi ce qui manque. »
@@ -50,7 +53,7 @@ pour la partie Angular les prompts majeurs sont:
 « Quand je charge tel preset, le sampler affiche ‘Unable to decode audio data’ : analyse la cause explique en détails l'origine du problème ainsi que la façon de le régler. »
 
 
-### Lancement classique
+### Lancement Partie Sampler (Front End)
 Il faut se placer dans le dossier ExempleRESTEndpointCorrige dans le terminal bash
 ```bash
 npm i cors
@@ -63,10 +66,10 @@ npm run start
 
 et enfin faire Open with live serveur dans le dossier index.html
 
-### Lancement angular `ng serve`
+### Lancement Angular avec `ng serve`
 
 Prérequis :
-- Node.js installé (version 18+ conseillée).
+- Node.js installé (version 18+).
 - Le back-end démarré dans `ExampleRESTEndpointCorrige` (`npm run start`).
 
 Depuis la racine du projet :
@@ -81,7 +84,7 @@ Par défaut, Angular démarre sur `http://localhost:4200/`.
 
 L’app appelle l’API de presets sur `http://localhost:3000/api/presets`.
 
-Si l’URL du back-end change, mets à jour `src/environments/environment.ts` :
+Si l’URL du back-end change, mettre à jour `src/environments/environment.ts` :
 
 ```ts
 export const environment = {
@@ -103,13 +106,13 @@ puis faire
 npm run start
 ```
 
-puis Ouvrir faire Open with live serveur dans le dossier
+puis faire Open with live serveur dans le dossier
 
 Les résultats s’affichent dans la console et sur la page (sans widgets UI).
 
 ### Explications Sampler classique
-0.Information CRITIQUE:
- la partie de sauvegarde de nouveau preset ou de nouveaux sons a été faite avant de recevoir les consignes et cela ayant une application similaire a votre demande "10.OPTIONNEL (MAIS SOUHAITE): possibilité de sauvegarder un nouveau preset sur le serveur." noter que ce que nous avons implémenté ne réalise pas cela mais une autre façon de faire qui est de les sauvegarder dans la mémoire local du navigateur, même si cette fonctionnalité est moins bonne que la 10. nous avons préféré la conserver malgrés tout.
+Information CRITIQUE:
+ La partie de sauvegarde de nouveau preset ou de nouveaux sons a été faite avant de recevoir les consignes et cela ayant une application similaire a votre demande "10.OPTIONNEL (MAIS SOUHAITE): possibilité de sauvegarder un nouveau preset sur le serveur." notez que ce que nous avons implémenté ne réalise pas ceci mais une autre façon de faire qui est de les sauvegarder dans la mémoire locale du navigateur, même si cette fonctionnalité est moins bonne que celle sugérée nous avons préféré la conserver malgré tout.
 
 1. Architecture globale du sampler Web
 
@@ -631,17 +634,3 @@ Fonctionnement :
 		- Construit de nouveaux `PresetSample` avec `buildSamplesFromUpload`.
 		- Concatène anciens + nouveaux + URLs, applique la limite de 16.
 		- Envoie le `PUT` avec la nouvelle liste complète de `samples`.
-
-3.Résumé du flux fonctionnel
-
-- **Lister** : `/` → `PresetsListComponent` → `GET /api/presets`.
-- **Créer** : `/createsampler` → `CreateSamplerComponent` → validations →
-	`POST /api/presets` (+ `POST /api/upload/:folder` si fichiers).
-- **Modifier** : `/modifysampler/:name` → `ModifySamplerComponent` →
-	chargement du preset → édition → `PUT /api/presets/:originalName`
-	(+ `POST /api/upload/:folder` si nouveaux fichiers).
-- **Renommer rapide** : bouton “Rename” dans la liste → `PATCH /api/presets/:name`.
-- **Supprimer** : bouton “Delete” dans la liste → `DELETE /api/presets/:name`.
-
-Cette app Angular est ainsi un panneau d’administration complet pour préparer
-et maintenir les presets utilisés par le sampler Web principal.
