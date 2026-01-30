@@ -17,8 +17,14 @@ import {
 export const app = express();
 app.use(express.json({ limit: "2mb" }));
 
-// Simple CORS: allow all origins (suffisant pour ce projet)
-app.use(cors());
+
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // allow non-browser clients like curl or Postman
+    const ok = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+    cb(ok ? null : new Error("Not allowed by CORS"), ok);
+  }, // allow all origins for testing; in production, specify allowed origins
+}));
 
 
 // configure multer for file uploads
