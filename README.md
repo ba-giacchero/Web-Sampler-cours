@@ -13,24 +13,40 @@ Utilisation d'IA:
 Le seul outils utilisé a été copilot, la partie FRONT-END (sampler) ayant été réalisé majoritèrement avant de recevoir les consignes nous ne possèdons plus les prompt précis concernant cette partie.
 
 pour les parties récente du FRONT-END (sampler) les prompts majeurs sont:
+
 -dans le contexte de ce projet, qu'est ce qu'un headless et que doit il réaliser, comment doit il fonctionner, détail ta  réponse le plus possible.
+
 -dans ce projet on a séparé la GUI du moteur audio, cette séparation est elle propre, si oui pourquoi.
+
 -dans le dossier contexte je t'ai donné un exemple du cours de barre de progression, explique en détail ligne par ligne son fonctionnement
 
 pour la partie Angular les prompts majeurs sont:
 « Analyse tout le code du sampler et explique-moi comment les presets sont chargés depuis l’API et appliqués aux pads. »
+
 « Fais un mapping entre les exigences du sujet et les fichiers/fonctions de mon projet actuel, et dis-moi ce qui manque. »
+
 « Crée pour moi un mini projet Angular dans ce repo, qui liste les presets à partir de l’API existante /api/presets. »
+
 « Configure Angular pour communiquer avec mon back-end sur http://localhost:3000, qui lui mme utilise CORS»
+
 « Empêche la création d’un preset si une des URLs ne pointe pas vers un fichier audio valide sur mon back-end. »
+
 « Fais en sorte que les fichiers audio ajoutés par drag & drop se cumulent avec ceux du file picker, dans la limite de 16. »
+
 « Mutualise toute la logique d’upload et de validation d’URLs dans un utilitaire partagé pour éviter la duplication entre composants. »
+
 « Implémente la mise à jour complète d’un preset via PUT /api/presets/:name côté Angular, en conservant type et isFactoryPresets. »
+
 « Explique moi les messages d’erreur Angular pour les opérations sur les presets »
+
 « Ajoute des indicateurs de chargement (spinners/texte) pour toutes les requêtes HTTP liées aux presets. »
+
 « Identifie le code dupliqué entre CreateSamplerComponent et ModifySamplerComponent et propose un refactoring propre. »
+
 « Assure-toi que les presets créés/modifiés via Angular restent compatibles avec le sampler (structure JSON, chemins d’URLs). »
+
 « Explique comment un preset JSON est transformé en URLs utilisées par le sampler dans js/presets.js. »
+
 « Quand je charge tel preset, le sampler affiche ‘Unable to decode audio data’ : analyse la cause explique en détails l'origine du problème ainsi que la façon de le régler. »
 
 
