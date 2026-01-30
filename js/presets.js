@@ -1,6 +1,9 @@
 import { pixelToSeconds } from './utils.js';
 
+// Module de gestion des presets : charge, normalise et affiche les kits de sons
+// Factory pour créer un système de presets avec injection de dépendances
 export function initPresets(deps = {}) {
+  // Dépendances injectées pour chargement, affichage et interaction
   const {
     API_BASE,
     loadAndDecodeSound,
@@ -16,6 +19,7 @@ export function initPresets(deps = {}) {
     trimPositions
   } = deps;
 
+  // État interne : liste de presets, cache des presets générés, sons décodés
   let presets = [];
   const generatedPresetStore = new Map();
   let lastDecodedSounds = [];
@@ -23,16 +27,22 @@ export function initPresets(deps = {}) {
   let waveformCanvas = null;
   let trimbarsDrawer = null;
 
+  // Injecte le module d'assignations (drag-drop, file picker)
   function setAssignments(a) { assignments = a; }
+  // Injecte l'interface de visualisation du waveform et les trim bars
   function setWaveformUI(ui) { if (ui) { waveformCanvas = ui.waveformCanvas; trimbarsDrawer = ui.trimbarsDrawer; } }
 
+  // Récupère les données de presets depuis une URL (JSON) avec CORS
   async function fetchPresets(url) {
     const res = await fetch(url, { mode: 'cors' });
     if (!res.ok) throw new Error(`HTTP ${res.status} en récupérant ${url}`);
     return res.json();
   }
 
+  // Normalise différents formats de presets en structure standard { name, files }
+  // Supporte : array direct, presets.samples, presets.files, presets.urls
   function normalizePresets(raw) {
+    // Convertit les chemins relatifs en URLs absolues basées sur API_BASE
     const makeAbsFromApi = (p) => new URL(p, API_BASE).toString();
 
     if (Array.isArray(raw)) {
@@ -58,20 +68,25 @@ export function initPresets(deps = {}) {
     return [];
   }
 
+  // Charge un preset généré (depuis slicer, pitch sampler, etc.)
+  // Crée une grille de boutons avec les buffers audio et positions de trim
   async function loadGeneratedPreset(preset) {
+    // Récupère les buffers audio stockés pour ce preset
     const data = generatedPresetStore.get(preset.id);
     if (!data) throw new Error('Generated preset not found');
     const decodedSounds = data.buffers.slice(0);
     lastDecodedSounds = decodedSounds.slice(0);
+    // Mapping spatial : remet les sons dans l'ordre de grille
     const mapping = [12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3];
     const assignedBuffers = new Array(16).fill(null);
     const assignedIndex = new Array(16).fill(null);
+    // Remappe les buffers selon la grille 4x4
     for (let p = 0; p < data.buffers.length && p < mapping.length; p++) {
       assignedBuffers[mapping[p]] = data.buffers[p];
       assignedIndex[mapping[p]] = p;
     }
 
-    // build grid
+    // Crée une grille de 16 boutons, chacun associé à un son ou vide
     const totalSlots = KEYBOARD_KEYS.length || 16;
       for (let i=0;i<totalSlots;i++) {
       const btn = document.createElement('button');
@@ -111,6 +126,8 @@ export function initPresets(deps = {}) {
     }
   }
 
+  // Crée un preset à partir de buffers audio (pour slicer, pitch sampler, etc.)
+  // Retourne { id, opt } pour ajouter le preset à la liste
   function createPresetFromBuffers(name, buffers, names, type='buffers', pitchRates) {
     const id = `gen-${Date.now()}`;
     generatedPresetStore.set(id, { buffers, names, type, pitchRates });
@@ -122,11 +139,15 @@ export function initPresets(deps = {}) {
     return { id, opt };
   }
 
+  // Charge un preset par index : récupère le JSON, crée la grille de boutons
+  // Gère le chargement progressif avec barres de progression par fichier
   async function loadPresetByIndex(idx) {
     const preset = presets[idx];
     if (!preset) return;
+    // Vide la grille et réinitialise les messages d'erreur
     buttonsContainer.innerHTML = '';
     showError('');
+    // Gérée de manière spéciale : les buffers sont déjà en mémoire
     if (preset.generated) {
       showStatus(`Loading generated preset…`);
       try {
@@ -138,10 +159,11 @@ export function initPresets(deps = {}) {
 
     showStatus(`Loading ${preset.files.length} file(s)…`);
     try {
+      // Précrée les boutons et lance les chargements en parallèle
       const mapping = [12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3];
       const totalSlots = KEYBOARD_KEYS.length || 16;
       lastDecodedSounds = [];
-      // Pre-create grid with loading placeholders and per-sound progress bars
+      // Crée les boutons avec barres de progression et démarre les chargements
       const slotButtons = new Array(totalSlots).fill(null);
       const loadPromises = [];
       for (let i = 0; i < totalSlots; i++) {
@@ -149,7 +171,7 @@ export function initPresets(deps = {}) {
         slotButtons[i] = btn;
         const assignedKey = KEYBOARD_KEYS[i] || null;
         if (assignedKey) btn.dataset.key = assignedKey;
-        // Determine if this slot maps to a file in the preset
+        // Détermine si ce slot est associé à un fichier du preset
         const mapIndex = mapping.indexOf(i);
         const hasFile = mapIndex !== -1 && mapIndex < preset.files.length;
         if (hasFile) {
@@ -157,7 +179,7 @@ export function initPresets(deps = {}) {
           const name = (url && url.split('/').pop()) || `sound ${mapIndex + 1}`;
           const soundNum = mapIndex + 1;
           btn.textContent = `Loading ${soundNum} — ${name}`;
-          // Progress bar element
+          // Crée une barre de progression pour ce fichier
           const prog = document.createElement('progress');
           prog.value = 0; prog.max = 1;
           prog.style.display = 'block';
@@ -165,30 +187,34 @@ export function initPresets(deps = {}) {
           prog.style.marginTop = '6px';
           btn.appendChild(prog);
 
-          // Start loading with progress if available
+          // Lance le chargement avec mise à jour de la barre si disponible
           const loader = (typeof loadAndDecodeWithProgress === 'function')
             ? loadAndDecodeWithProgress(url, (loaded, total) => { try { if (total > 0) { prog.max = total; prog.value = loaded; } else { prog.removeAttribute('value'); } } catch(_){} })
             : loadAndDecodeSound(url);
 
+          // Quand le fichier est chargé, finalise le bouton et enregistre le buffer
           const p = Promise.resolve(loader).then((decodedSound) => {
             // Remove progress bar and finalize button
             try { prog.remove(); } catch(_){}
             btn.textContent = `Play ${soundNum} — ${name}`;
-            // store decoded sound in the correct mapping position
+            // Stocke le son décodé et initialise la position de trim
             lastDecodedSounds[mapIndex] = decodedSound;
             // initialize trim for this url
             trimPositions.set(url, { start: 0, end: decodedSound.duration });
             btn.addEventListener('click', () => {
               try { showWaveformForSound(decodedSound, url); } catch (err) { console.warn('Unable to show waveform', err); }
               try { if (window && window.ctx && window.ctx.state === 'suspended') window.ctx.resume(); } catch (e) {}
+              // Récupère les positions de trim : depuis le stockage ou depuis les trim bars
               let start = 0; let end = decodedSound.duration;
               const stored = trimPositions.get(url);
               if (stored) { start = stored.start; end = stored.end; }
+              // Fallback : utilise les positions visuelles des trim bars si disponibles
               else if (trimbarsDrawer && waveformCanvas) {
                 const l = trimbarsDrawer.leftTrimBar.x; const r = trimbarsDrawer.rightTrimBar.x;
                 start = pixelToSeconds(l, decodedSound.duration, waveformCanvas.width);
                 end = pixelToSeconds(r, decodedSound.duration, waveformCanvas.width);
               }
+              // S'assure que les positions sont valides (min 0.01s de durée)
               start = Math.max(0, Math.min(start, decodedSound.duration));
               end = Math.max(start + 0.01, Math.min(end, decodedSound.duration));
               trimPositions.set(url, { start, end });
@@ -217,6 +243,7 @@ export function initPresets(deps = {}) {
     } catch (err) { console.error(err); showError(`Erreur lors du chargement du preset "${preset.name}": ${err.message || err}`); }
   }
 
+  // Exporte l'API publique du module de presets
   return {
     fetchPresets,
     normalizePresets,

@@ -1,12 +1,16 @@
 import { mkBtn, mkEl, placePopupNear, makeListRow } from './ui-helpers.js';
-// fonction de choix des enregistrements existants
-// elle permet de lister les enregistrements, de les assigner à un slot, ou de les supprimer
-// elle est utilisée dans index.js lors du choix de la source d'un slot de sampler
+// choosers.js
+// Module de sélection : affiche des popups pour choisir enregistrements ou sons locaux
+
+// Affiche un popup pour choisir un enregistrement existant et l'assigner à un slot
+// Dépendant du slot, permet de charger, supprimer ou créer
 export async function showRecordingsChooser(slotIndex, anchorEl, deps) {
   const { listRecordings, getRecording, deleteRecording, assignFileToSlot, decodeFileToBuffer } = deps;
+  // Supprime l'ancien chooser s'il existe
   const existing = document.getElementById('recordingsChooser');
   if (existing) existing.remove();
 
+  // Crée le conteneur popup positionné près de l'élément d'ancrage
   const container = mkEl('div', null, { position: 'absolute', zIndex: 9999, padding: '8px', maxHeight: '220px', overflow: 'auto' });
   container.id = 'recordingsChooser';
 
@@ -16,6 +20,7 @@ export async function showRecordingsChooser(slotIndex, anchorEl, deps) {
   title.textContent = 'Choisir une source';
   container.appendChild(title);
 
+  // Boutons pour charger fichier local ou sélectionner enregistrement
   const btnRow = mkEl('div', null, { display: 'flex', gap: '6px', marginBottom: '8px' });
   const localBtn = mkBtn('action-btn');
   localBtn.textContent = 'Fichier local…';
@@ -29,6 +34,7 @@ export async function showRecordingsChooser(slotIndex, anchorEl, deps) {
   const list = mkEl('div', null, { display: 'block', fontSize: '13px', minWidth: '220px' });
   container.appendChild(list);
 
+  // Charge et affiche la liste des enregistrements avec boutons Use/Delete
   async function populateRecordings() {
     list.innerHTML = '';
     try {
@@ -40,6 +46,7 @@ export async function showRecordingsChooser(slotIndex, anchorEl, deps) {
         return;
       }
       recs.sort((a,b) => b.created - a.created);
+      // Crée une ligne pour chaque enregistrement avec boutons Use et Delete
       recs.forEach(r => {
         const actions = [
           { text: 'Use', classNames: 'action-btn', onClick: async (e) => {
@@ -83,13 +90,12 @@ export async function showRecordingsChooser(slotIndex, anchorEl, deps) {
 
   savedBtn.onclick = () => populateRecordings();
 
-  // expose a simple hook for the caller to wire local file button behaviour
+  // Retourne le conteneur et un hook pour connecter le bouton fichier local
   return { container, res, wireLocal: (fn) => { localBtn.onclick = () => { fn(); container.remove(); if (res && res.detach) res.detach(); }; } };
 }
 
-// fonction de choix des sons locaux (enregistrements)
-// elle permet de lister les sons locaux, d'en sélectionner jusqu'à 16, et de les retourner décodés via onCreate
-// elle est utilisée dans index.js lors de la création d'un nouveau preset de sampler
+// Affiche un popup pour choisir jusqu'à 16 sons locaux et créer un nouveau preset sampler
+// Combine les enregistrements, les sons déjà décodés et les blobs
 export async function showLocalSoundsChooser(anchorEl, onCreate, deps, onSelect, opts = {}) {
   const { listRecordings, getRecording, decodeFileToBuffer, decodedItems = [] } = deps || {};
   const existing = document.getElementById('localSoundsChooser');
@@ -98,12 +104,14 @@ export async function showLocalSoundsChooser(anchorEl, onCreate, deps, onSelect,
   let recs = [];
   try { recs = await listRecordings(); } catch (err) { console.warn('Unable to list recordings', err); }
 
+  // Combine les éléments déjà décodés avec les enregistrements
   const recordingItems = (recs || []).map(r => ({ id: `rec-${r.id}`, source: 'recording', buffer: null, blob: r.blob, name: r.name || `rec-${r.id}`, recId: r.id }));
   const items = [...(decodedItems || []), ...recordingItems];
   // include decoded items, items with blob, and recordings (even if blob not yet fetched)
   const available = items.filter(it => it.buffer || it.blob || it.source === 'recording');
   if (!available || available.length === 0) { alert('Aucun son local disponible.'); return; }
 
+  // Crée le conteneur popup avec liste des sons disponibles
   const container = mkEl('div', null, { position: 'absolute', zIndex: '10000', padding: '10px' });
   container.id = 'localSoundsChooser';
   const res = placePopupNear(anchorEl, container, { side: 'below', margin: 8 });
@@ -115,11 +123,12 @@ export async function showLocalSoundsChooser(anchorEl, onCreate, deps, onSelect,
   const list = mkEl('div', null, { maxHeight: '320px', overflow: 'auto', marginBottom: '8px' });
   container.appendChild(list);
 
-  // optional checkbox/select mode and per-item load button
+  // Crée les lignes de sons avec cases à cocher et bouton Charger
   let selectedCount = 0;
   const checkboxes = [];
   const showCheckboxes = opts.showCheckboxes !== false;
 
+  // Construit une ligne pour chaque son avec case à cocher et bouton de chargement
   // Note: this basic implementation expects caller to populate decodedItems or pass them differently.
   available.forEach((it) => {
     const row = mkEl('div', null, { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' });
@@ -134,14 +143,14 @@ export async function showLocalSoundsChooser(anchorEl, onCreate, deps, onSelect,
     const label = mkEl('div', null, { flex: '1' }); label.textContent = it.name; left.appendChild(label);
     row.appendChild(left);
 
-    // optionally show a per-item "Charger" button; callers can hide it via opts.showLoadButton = false
+    // Bouton pour charger un son individuel en prévisualisation
     if (opts.showLoadButton !== false) {
       const play = mkBtn('action-btn'); play.textContent = 'Charger'; play.style.marginLeft = '8px';
       play.addEventListener('click', async (e) => {
         e.stopPropagation();
         try {
           let buffer = it.buffer;
-          // if we don't have a buffer yet, try to obtain a blob: either from it.blob or via getRecording
+          // Si pas de buffer, récupère depuis blob ou IndexedDB
           if (!buffer) {
             let blob = it.blob;
             if (!blob && it.recId && typeof getRecording === 'function') {
@@ -156,7 +165,7 @@ export async function showLocalSoundsChooser(anchorEl, onCreate, deps, onSelect,
               it.buffer = buffer;
             }
           }
-          // Do not auto-play here. Treat this button as "Charger" (load into top preview).
+          // Decode et appelle onSelect avec le buffer chargé
           if (buffer && typeof onSelect === 'function') {
             try { onSelect([{ buffer, name: it.name, index: it.index }]); } catch (err) { console.error('onSelect callback error', err); }
             container.remove(); if (res && res.detach) res.detach();
@@ -168,6 +177,7 @@ export async function showLocalSoundsChooser(anchorEl, onCreate, deps, onSelect,
 
     list.appendChild(row);
 
+    // Limite la sélection à 16 sons maximum
     if (showCheckboxes && cb) {
       cb.addEventListener('change', () => {
         if (cb.checked) {
@@ -178,11 +188,13 @@ export async function showLocalSoundsChooser(anchorEl, onCreate, deps, onSelect,
     }
   });
 
+  // Boutons d'action : Créer le sampler ou Annuler
   const actions = mkEl('div', null, { display: 'flex', gap: '8px' });
   // only show the create button when in selection mode
   if (opts.showCreateButton !== false) {
     const createBtn = mkBtn('action-btn'); createBtn.textContent = 'Créer le sampler';
     createBtn.addEventListener('click', async () => {
+      // Récupère les sons sélectionnés et les décode si nécessaire
       const selected = [];
       for (const cb of checkboxes) if (cb.checked) {
         const id = cb.dataset.itemId; const it = available.find(x => x.id === id); if (!it) continue;
@@ -199,5 +211,6 @@ export async function showLocalSoundsChooser(anchorEl, onCreate, deps, onSelect,
   const cancelBtn = mkBtn('action-btn'); cancelBtn.textContent = 'Annuler'; cancelBtn.addEventListener('click', () => { container.remove(); if (res && res.detach) res.detach(); });
   actions.appendChild(cancelBtn); container.appendChild(actions);
 
+  // Retourne le conteneur et le gestionnaire de fermeture
   return { container, res };
 }

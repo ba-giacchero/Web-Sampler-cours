@@ -1,6 +1,5 @@
 // assignments.js
-// Extracted helpers for assigning files/buffers to sampler slots,
-// drag & drop and file picker wiring.
+// Module d'assignation : assigne des fichiers/buffers aux slots, gère drag-drop et file picker
 
 export function initAssignments(deps) {
   const {
@@ -22,13 +21,15 @@ export function initAssignments(deps) {
     showError
   } = deps;
 
-  // mapping used across the app: bottom-left -> left->right then upward
+  // Mapping spatial : convertit l'index de slot vers le numéro d'affichage (1-16 en bas-gauche)
   const mapping = [12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3];
+  // Convertit un index de slot interne en numéro d'affichage (1-16)
   function displayNumberForSlot(idx) {
     const pos = mapping.indexOf(idx);
     return pos !== -1 ? (pos + 1) : (idx + 1);
   }
 
+  // Ouvre le file picker natif pour sélectionner un fichier audio local
   async function pickFileForSlot(slotIndex) {
     if (!filePicker) return;
     filePicker.onchange = async (ev) => {
@@ -40,6 +41,7 @@ export function initAssignments(deps) {
     filePicker.click();
   }
 
+  // Assigne un fichier audio décodé à un slot : crée le bouton et configure les événements
   async function assignFileToSlot(file, slotIndex, targetBtn) {
     if (!file) return;
     try {
@@ -49,11 +51,11 @@ export function initAssignments(deps) {
       // store buffer in decodedSounds via currentButtons usage externally
       // caller is responsible for keeping decodedSounds in sync if needed
 
-      // pseudo-url for trims
+      // Crée une pseudo-URL pour stocker les positions de trim
       const pseudoUrl = `local:${file.name}`;
       if (trimPositions) trimPositions.set(pseudoUrl, { start: 0, end: buffer.duration });
 
-      // determine which button to replace: prefer explicit targetBtn (from the '+' that was clicked)
+      // Crée ou remplace le bouton du slot
       const buttonsArr = (typeof getCurrentButtons === 'function') ? getCurrentButtons() : (currentButtons || []);
       let btn = targetBtn && targetBtn.nodeType === 1 ? targetBtn : buttonsArr[slotIndex];
       // if no button found, create one and append
@@ -89,10 +91,11 @@ export function initAssignments(deps) {
       newBtn.textContent = `Play ${soundNum} — ${file.name}`;
       newBtn.classList.remove('empty-slot');
 
+      // Configure le gestionnaire de clic : affiche le waveform et joue le son avec trim
       newBtn.addEventListener('click', () => {
         try { if (showWaveformForSound) showWaveformForSound(buffer, pseudoUrl); } catch (err) { console.warn('Unable to show waveform for local file', err); }
         try {
-          // prefer explicit trim positions stored in trimPositions map (set by waveform-ui)
+          // Utilise les positions de trim stockées, sinon lit le buffer complet
           let start = 0;
           let end = buffer.duration;
           try {
@@ -121,6 +124,7 @@ export function initAssignments(deps) {
     }
   }
 
+  // Assigne un buffer audio déjà décodé (depuis preset généré) à un slot
   async function assignBufferToSlot(buffer, name, slotIndex) {
     if (!buffer) return;
     try {
@@ -169,6 +173,7 @@ export function initAssignments(deps) {
     }
   }
 
+  // Configure drag-drop sur un bouton : permet de glisser un fichier pour l'assigner
   function enableDragDropOnButton(btn, slotIndex) {
     btn.addEventListener('dragenter', (e) => { e.preventDefault(); btn.classList.add('drag-over'); });
     btn.addEventListener('dragover', (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; btn.classList.add('drag-over'); });
@@ -176,6 +181,7 @@ export function initAssignments(deps) {
     btn.addEventListener('drop', async (e) => {
       try {
         e.preventDefault(); btn.classList.remove('drag-over');
+        // Récupère le fichier depuis DataTransfer (items ou files)
         let f = null;
         if (e.dataTransfer) {
           if (e.dataTransfer.files && e.dataTransfer.files.length > 0) f = e.dataTransfer.files[0];
@@ -197,7 +203,9 @@ export function initAssignments(deps) {
     });
   }
 
+  // Configure le bouton '+' pour ouvrir le file picker et sélectionner enregistrements/fichiers
   function enableFilePickerOnButton(btn, slotIndex) {
+    // Crée ou récupère le bouton '+' d'assignation
     let assign = btn.querySelector('.assign-icon');
     if (!assign) {
       assign = document.createElement('span');
@@ -228,12 +236,14 @@ export function initAssignments(deps) {
     assign.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); assign.click(); } });
   }
 
+  // Convertit un numéro d'affichage (1-16) vers l'index de slot interne
   function displayNumberToSlotIndex(displayNumber) {
     const n = Number(displayNumber);
     if (!n || isNaN(n) || n < 1 || n > mapping.length) return null;
     return mapping[n - 1];
   }
 
+  // Exporte l'API publique du module d'assignation
   return {
     pickFileForSlot,
     assignFileToSlot,

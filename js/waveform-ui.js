@@ -2,12 +2,12 @@ import TrimbarsDrawer from './trimbarsdrawer.js';
 import { pixelToSeconds } from './utils.js';
 import { drawWaveform, drawMiniWaveform } from './waveforms.js';
 
-// Lightweight waveform UI module
-// Exports an init function which mounts the waveform container before the provided buttonsContainer
-// and returns the canvas elements and a `showWaveformForSound(buffer, url)` helper.
+// Module de waveform interactif
+// Crée les canvas pour afficher la forme d'onde et gérer le trim des sons
+// Gère les événements de souris pour déplacer les barres de trim
 
 export function initWaveformUI(buttonsContainer) {
-  // create container
+  // Crée le container principal pour la waveform
   const container = document.createElement('div');
   container.id = 'waveformContainer';
   container.style.margin = '12px auto';
@@ -16,6 +16,7 @@ export function initWaveformUI(buttonsContainer) {
   container.style.width = '100%';
   container.style.boxSizing = 'border-box';
 
+  // Canvas principal pour afficher la waveform du son
   const waveformCanvas = document.createElement('canvas');
   waveformCanvas.width = 800;
   waveformCanvas.height = 120;
@@ -25,6 +26,7 @@ export function initWaveformUI(buttonsContainer) {
   waveformCanvas.style.zIndex = '1';
   container.appendChild(waveformCanvas);
 
+  // Canvas overlay pour dessiner les barres de trim (au-dessus de la waveform)
   const overlayCanvas = document.createElement('canvas');
   overlayCanvas.width = 800;
   overlayCanvas.height = 120;
@@ -37,38 +39,45 @@ export function initWaveformUI(buttonsContainer) {
   overlayCanvas.style.background = 'transparent';
   container.appendChild(overlayCanvas);
 
-  // insert container above the buttons grid
+  // Insère le container avant la grille des boutons
   if (buttonsContainer && buttonsContainer.parentElement) {
     buttonsContainer.insertAdjacentElement('beforebegin', container);
   } else {
-    // fallback: append to body
+    // Fallback : ajoute au body si pas de container
     document.body.appendChild(container);
   }
 
-  // hide the waveform UI until a sound is shown
+  // Masque la waveform jusqu'à ce qu'un son soit affiché
   container.style.display = 'none';
 
+  // Crée le gestionnaire des barres de trim gauche/droite
   const trimbarsDrawer = new TrimbarsDrawer(overlayCanvas, 100, 200);
 
+  // Suivi de la position de la souris en coordonnées canvas
   const mousePos = { x: 0, y: 0 };
   overlayCanvas.onmousemove = (evt) => {
     try {
+      // Calcule la position relative au canvas en tenant compte du scaling
       const rect = overlayCanvas.getBoundingClientRect();
       const scaleX = overlayCanvas.width / rect.width;
       const scaleY = overlayCanvas.height / rect.height;
       mousePos.x = (evt.clientX - rect.left) * scaleX;
       mousePos.y = (evt.clientY - rect.top) * scaleY;
+      // Déplace les barres de trim en fonction de la souris
       if (trimbarsDrawer && typeof trimbarsDrawer.moveTrimBars === 'function') trimbarsDrawer.moveTrimBars(mousePos);
     } catch (err) {
       console.warn('waveform-ui overlay mousemove error', err);
     }
   };
 
+  // Commence le déplacement des barres de trim au clic
   overlayCanvas.onmousedown = () => trimbarsDrawer.startDrag();
 
+  // Arrête le déplacement et convertit les positions en secondes
   function stopDragAndSave(currentShownBuffer, currentShownUrl) {
     trimbarsDrawer.stopDrag();
     if (currentShownBuffer && currentShownUrl) {
+      // Convertit les positions en pixels en positions en secondes
       const leftPx = trimbarsDrawer.leftTrimBar.x;
       const rightPx = trimbarsDrawer.rightTrimBar.x;
       const leftSec = pixelToSeconds(leftPx, currentShownBuffer.duration, waveformCanvas.width);
@@ -78,11 +87,13 @@ export function initWaveformUI(buttonsContainer) {
     return null;
   }
 
+  // Au relâchement de la souris, envoie l'événement custom avec les nouvelles positions
   overlayCanvas.onmouseup = () => {
     try {
       trimbarsDrawer.stopDrag();
-      // compute and dispatch trimmed positions if possible
+      // Calcule et envoie les positions de trim si possible
       if (currentShownBuffer && currentShownUrl) {
+        // Envoie un événement avec les positions en secondes
         const leftPx = trimbarsDrawer.leftTrimBar.x;
         const rightPx = trimbarsDrawer.rightTrimBar.x;
         const leftSec = pixelToSeconds(leftPx, currentShownBuffer.duration, waveformCanvas.width);
@@ -96,6 +107,7 @@ export function initWaveformUI(buttonsContainer) {
     }
   };
 
+  // Boucle d'animation pour redessiner les barres de trim à chaque frame
   function animateOverlay() {
     try {
       if (trimbarsDrawer) {
@@ -109,22 +121,26 @@ export function initWaveformUI(buttonsContainer) {
   }
   requestAnimationFrame(animateOverlay);
 
-  // state for the currently shown buffer/url
+  // Mémorise le buffer et l'URL du son actuellement affiché
   let currentShownBuffer = null;
   let currentShownUrl = null;
 
+  // Affiche la waveform pour un son et restaure ses positions de trim
   function showWaveformForSound(buffer, url, trimPositionsMap) {
     if (!waveformCanvas) return;
+    // Affiche le container
     const containerEl = waveformCanvas.parentElement;
     if (containerEl) containerEl.style.display = '';
     currentShownBuffer = buffer;
     currentShownUrl = url;
 
-    // draw waveform and ensure overlay canvas is synced for trimbars
+    // Dessine la waveform et synchronise l'overlay pour les barres
     try { drawWaveform(buffer, waveformCanvas, overlayCanvas); } catch (err) { console.warn('drawWaveform error', err); }
 
-    // restore trims (seconds -> pixels)
+    // Restaure les positions de trim (secondes -> pixels)
+    // Récupère les positions stockées ou initialise du début à la fin
     const stored = (trimPositionsMap && trimPositionsMap.get(url)) || { start: 0, end: buffer.duration };
+    // Convertit les secondes en pixels sur le canvas
     const leftPx = (stored.start / buffer.duration) * waveformCanvas.width;
     const rightPx = (stored.end / buffer.duration) * waveformCanvas.width;
     trimbarsDrawer.leftTrimBar.x = leftPx;
@@ -132,13 +148,14 @@ export function initWaveformUI(buttonsContainer) {
     if (trimPositionsMap) trimPositionsMap.set(url, { start: stored.start, end: stored.end });
   }
 
+  // Retourne les éléments et fonctions publiques du module
   return {
-    waveformCanvas,
-    overlayCanvas,
-    trimbarsDrawer,
-    showWaveformForSound,
-    drawMiniWaveform,
-    stopDragAndSave: () => stopDragAndSave(currentShownBuffer, currentShownUrl),
-    getCurrentShown: () => ({ buffer: currentShownBuffer, url: currentShownUrl })
+    waveformCanvas,        // Canvas principal pour la waveform
+    overlayCanvas,         // Canvas overlay pour les barres de trim
+    trimbarsDrawer,        // Gestionnaire des barres de trim
+    showWaveformForSound,  // Fonction pour afficher une waveform
+    drawMiniWaveform,      // Fonction pour dessiner une mini waveform
+    stopDragAndSave: () => stopDragAndSave(currentShownBuffer, currentShownUrl),  // Arrête le trim et retourne les positions
+    getCurrentShown: () => ({ buffer: currentShownBuffer, url: currentShownUrl })  // Retourne le son actuellement affiché
   };
 }

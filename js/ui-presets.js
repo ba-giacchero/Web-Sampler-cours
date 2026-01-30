@@ -1,6 +1,9 @@
 import { pixelToSeconds } from './utils.js';
 
+// Module de gestion des presets personnalisés
+// Crée un menu déroulant stylisé et propose 3 options de création : sons locaux, slicing, pitch
 export function initUIPresets(deps = {}) {
+  // Récupère les dépendances injectées
   const {
     presetSelect,
     showLocalSoundsChooser,
@@ -17,12 +20,15 @@ export function initUIPresets(deps = {}) {
   } = deps;
   const audioCtx = (deps && deps.ctx) || (typeof window !== 'undefined' && window.ctx) || null;
 
+  // Remplace le <select> HTML par un bouton stylisé avec dropdown personnalisé
   function createCustomPresetDropdown() {
     if (!presetSelect) return;
     if (document.querySelector('.custom-select-wrapper')) return;
 
+    // Cache le select original
     presetSelect.style.display = 'none';
 
+    // Crée le wrapper et le bouton personnalisé
     const wrapper = document.createElement('div');
     wrapper.className = 'custom-select-wrapper';
 
@@ -39,6 +45,7 @@ export function initUIPresets(deps = {}) {
     btn.appendChild(caret);
 
     wrapper.appendChild(btn);
+    // Crée le dropdown positionné en absolu
     const dropdown = document.createElement('div');
     dropdown.id = 'presetDropdown';
     dropdown.style.display = 'none';
@@ -46,6 +53,7 @@ export function initUIPresets(deps = {}) {
     dropdown.style.zIndex = '9999';
     document.body.appendChild(dropdown);
 
+    // Remplit le dropdown avec les options du select
     function populateList() {
       dropdown.innerHTML = '';
       if (!presetSelect.options) return;
@@ -64,6 +72,7 @@ export function initUIPresets(deps = {}) {
       });
     }
 
+    // Gère l'ouverture/fermeture du dropdown
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       if (dropdown.style.display === 'none') {
@@ -82,13 +91,15 @@ export function initUIPresets(deps = {}) {
       }
     });
 
+    // Ferme le dropdown si clic ailleurs
     document.addEventListener('click', (ev) => { if (!wrapper.contains(ev.target) && !dropdown.contains(ev.target)) { dropdown.style.display = 'none'; window.removeEventListener('scroll', onWindowScroll, true); } });
     function onWindowScroll() { dropdown.style.display = 'none'; window.removeEventListener('scroll', onWindowScroll, true); }
 
+    // Insère le wrapper à la place du select
     presetSelect.parentElement.insertBefore(wrapper, presetSelect);
   }
 
-  // showAddPresetMenu: uses a number of helpers from main.js via deps
+  // Affiche le menu de création de presets personnalisés
   function showAddPresetMenu(anchorEl) {
     const existing = document.getElementById('addPresetMenu');
     if (existing) { existing.remove(); return; }
@@ -99,10 +110,12 @@ export function initUIPresets(deps = {}) {
     container.className = 'action-btn';
     container.style.padding = '8px';
 
+    // Positionne le menu sous le bouton ancre
     const rect = anchorEl.getBoundingClientRect();
     container.style.left = `${Math.max(6, rect.left + window.scrollX)}px`;
     container.style.top = `${rect.bottom + window.scrollY + 8}px`;
 
+    // Helper pour créer les boutons du menu
     const makeBtn = (text, cb) => {
       const b = document.createElement('button');
       b.type = 'button';
@@ -115,9 +128,10 @@ export function initUIPresets(deps = {}) {
       return b;
     };
 
-    // Create sampler from local sounds
+    // Option 1 : Créer un sampler à partir des sons locaux déjà chargés
     container.appendChild(makeBtn('Créer un sampler à partir des sons locaux', async () => {
       const decoded = (typeof getDecodedSounds === 'function') ? getDecodedSounds() : [];
+      // Récupère les noms des sons depuis les boutons
       const localBuffers = (decoded || []).map((b,i) => {
         const raw = (getCurrentButtons && typeof getCurrentButtons === 'function' && getCurrentButtons()[i] && getCurrentButtons()[i].textContent) ? getCurrentButtons()[i].textContent.trim() : null;
         const clean = raw ? raw.replace(/^Play\s+\d+\s*[—-]\s*/i, '') : `sound ${i+1}`;
@@ -125,7 +139,9 @@ export function initUIPresets(deps = {}) {
       });
       const available = localBuffers.filter(x => x.buffer);
       if (!available || available.length === 0) { showError('Aucun son local disponible.'); return; }
+      // Affiche le sélecteur de sons
       showLocalSoundsChooser(container, async (selectedItems) => {
+        // Crée un preset avec les sons sélectionnés (max 16)
         const steps = 16;
         const buffers = new Array(steps).fill(null);
         const names = new Array(steps).fill('');
@@ -142,8 +158,9 @@ export function initUIPresets(deps = {}) {
       }, { listRecordings, getRecording, decodeFileToBuffer, decodedItems: localBuffers.map((b) => ({ id: `local-${b.index}`, source: 'local', buffer: b.buffer, name: b.name, index: b.index })) }, undefined, { showLoadButton: false });
     }));
 
-    // Slicer on silences
+    // Option 2 : Slicer un enregistrement sur les silences
     container.appendChild(makeBtn('Slicer un enregistrement sur les silences', async () => {
+      // Récupère le buffer à découper
       let buf = null;
       const persistentActions = document.getElementById('persistentRecordingActions');
       if (persistentActions && persistentActions._info && persistentActions._info.buffer) {
@@ -151,6 +168,7 @@ export function initUIPresets(deps = {}) {
       } else if (typeof window.currentShownBuffer !== 'undefined' && window.currentShownBuffer) {
         buf = window.currentShownBuffer;
       } else {
+        // Fallback : récupère l'enregistrement le plus récent
         const recs = await listRecordings();
         if (!recs || recs.length === 0) { showError('Aucun enregistrement trouvé.'); return; }
         const r = recs.sort((a,b)=>b.created-a.created)[0];
@@ -160,23 +178,28 @@ export function initUIPresets(deps = {}) {
         try { buf = await decodeFileToBuffer(file); } catch (err) { showError('Impossible de décoder l’enregistrement.'); return; }
       }
 
+      // Fonction pour découper un buffer audio sur les silences
       function sliceBufferOnSilence(buffer, opts = {}) {
         const threshold = typeof opts.threshold === 'number' ? opts.threshold : 0.02;
         const minSilenceDuration = opts.minSilenceDuration || 0.12;
         const minSliceDuration = opts.minSliceDuration || 0.05;
         const padding = typeof opts.padding === 'number' ? opts.padding : 0.03;
 
+        // Convertit en mono pour l'analyse
         const sr = buffer.sampleRate;
         const len = buffer.length;
         const mono = new Float32Array(len);
         const channels = buffer.numberOfChannels;
         for (let c = 0; c < channels; c++) { const ch = buffer.getChannelData(c); for (let i = 0; i < len; i++) mono[i] += ch[i] / channels; }
+        // Calcule l'enveloppe RMS avec fenêtre glissante
         const win = Math.max(1, Math.floor(0.01 * sr));
         const env = new Float32Array(len);
         let sum = 0;
         for (let i = 0; i < len; i++) { sum += Math.abs(mono[i]); if (i >= win) sum -= Math.abs(mono[i - win]); env[i] = sum / Math.min(i + 1, win); }
+        // Détecte les zones de silence
         const silent = new Uint8Array(len);
         for (let i = 0; i < len; i++) silent[i] = env[i] < threshold ? 1 : 0;
+        // Découpe en segments selon les silences
         const minSilenceSamples = Math.floor(minSilenceDuration * sr);
         const minSliceSamples = Math.floor(minSliceDuration * sr);
         const padSamples = Math.floor(padding * sr);
@@ -196,6 +219,7 @@ export function initUIPresets(deps = {}) {
           if ((end - start) >= minSliceSamples) { const s = Math.max(0, start - padSamples); const e = Math.min(len, end + padSamples); segments.push({ start: s, end: e }); }
         }
         if (segments.length === 0) segments.push({ start: 0, end: len });
+        // Crée les nouveaux buffers pour chaque segment
         const out = segments.map(seg => {
           if (!audioCtx) throw new Error('AudioContext not available for slicing');
           const frameCount = seg.end - seg.start;
@@ -206,6 +230,7 @@ export function initUIPresets(deps = {}) {
         return out;
       }
 
+      // Exécute le slicing et crée le preset
       const slices = sliceBufferOnSilence(buf, { threshold: 0.02, minSilenceDuration: 0.12, minSliceDuration: 0.05, padding: 0.03 });
       if (!slices || slices.length === 0) { showError('Aucune découpe trouvée.'); return; }
       const maxSlots = 16;
@@ -221,14 +246,16 @@ export function initUIPresets(deps = {}) {
       }
     }));
 
-    // Pitch sampler
+    // Option 3 : Créer un sampler en pitchant le son (16 variations)
     container.appendChild(makeBtn('Créer un sampler en pitchant le son', async () => {
+      // Récupère le buffer à pitcher
       let buf = null;
       const persistentActions = document.getElementById('persistentRecordingActions');
       if (persistentActions && persistentActions._info && persistentActions._info.buffer) { buf = persistentActions._info.buffer; }
       else if (typeof window.currentShownBuffer !== 'undefined' && window.currentShownBuffer) { buf = window.currentShownBuffer; }
       if (!buf) {
         try {
+          // Fallback : récupère l'enregistrement le plus récent
           const recs = await listRecordings();
           if (recs && recs.length) {
             const r = recs.sort((a,b)=>b.created-a.created)[0];
@@ -237,9 +264,11 @@ export function initUIPresets(deps = {}) {
           }
         } catch (err) { console.warn('error while fetching recordings for pitch sampler fallback', err); }
       }
+      // Fallback : utilise un son local
       const decoded = (typeof getDecodedSounds === 'function') ? getDecodedSounds() : [];
       if (!buf && decoded && decoded.find(Boolean)) buf = decoded.find(Boolean);
       if (!buf) { showError('Aucun son disponible pour pitcher.'); return; }
+      // Crée 16 variations de pitch (0.6x à 1.8x)
       const steps = 16; const min = 0.6; const max = 1.8;
       const rates = Array.from({length: steps}, (_,i) => min + (i/(steps-1))*(max-min));
       const buffers = new Array(steps).fill(null).map(() => buf);
@@ -251,6 +280,7 @@ export function initUIPresets(deps = {}) {
       }
     }));
 
+    // Ajoute le menu au DOM et gère la fermeture
     document.body.appendChild(container);
     setTimeout(() => document.addEventListener('click', (e) => { if (!container.contains(e.target)) container.remove(); }), 10);
   }

@@ -1,5 +1,8 @@
-// Corrigé pour Live Server + API sur http://localhost:3000
+// main.js - Application principale du sampler audio
+// Orchestre tous les modules (presets, waveform, recorder, assignments)
+// Point d'entrée : initApp(root) pour initialiser l'interface
 
+// Importe les modules utilitaires et fonctionnalités
 import { loadAndDecodeSound, loadAndDecodeSoundWithProgress, playSound } from './soundutils.js';
 import { pixelToSeconds } from './utils.js';
 import { saveRecording, listRecordings, getRecording, deleteRecording } from './indexeddb.js';
@@ -12,13 +15,15 @@ import { initWaveformUI } from './waveform-ui.js';
 import { initRecorder } from './recorder.js';
 import { initUIPresets } from './ui-presets.js';
 
-// ====== CONFIG ORIGINS ======
+// === CONFIGURATION ===
+// API et serveur audio pour charger les presets et fichiers
 const API_BASE = 'http://localhost:3000';               // <- API + fichiers audio
 const PRESETS_URL = `${API_BASE}/api/presets`;
 
-// Web Audio
+// === CONTEXTE AUDIO ET UI ===
+// Contexte Web Audio API pour la lecture de sons
 let ctx;
-// UI (will be bound to a root inside initApp)
+// Eléments DOM liés à l'interface
 let rootEl = null;
 let presetSelect;
 let buttonsContainer;
@@ -27,7 +32,8 @@ let errorEl;
 let lastRecordingCanvas;
 let filePicker;
 
-// Etat
+// === ÉTAT GLOBAL ===
+// Données de presets et sons décodés du preset actuel
 let presets = [];          // [{ name, files:[absoluteUrl,...] }, ...]
 let decodedSounds = [];    // AudioBuffer[] du preset courant
 // presets module instance (initialized in window.onload)
@@ -37,11 +43,12 @@ let currentButtons = [];
 // per-sound trim positions stored by url (seconds)
 const trimPositions = new Map();
 
-// keyboard mapping: map 4x4 grid to sensible physical keys (AZERTY-friendly)
-// Row 1: &, é, ", '  (unshifted top-row keys on many AZERTY layouts)
-// Row 2: A, Z, E, R (AZERTY top letter row leftmost keys)
-// Row 3: Q, S, D, F (home row leftmost keys)
-// Row 4: W, X, C, V (bottom row leftmost keys)
+// === CLAVIER ===
+// Mapping touches clavier vers grille 4x4 (AZERTY-friendly)
+// Rangée 1: &, é, ", '  (touches de chiffres)
+// Rangée 2: A, Z, E, R (première rangée lettres AZERTY)
+// Rangée 3: Q, S, D, F (rangée accueil)
+// Rangée 4: W, X, C, V (rangée du bas)
 const KEYBOARD_KEYS = [
   '&','é','"','\'' ,
   'a','z','e','r',
@@ -49,18 +56,22 @@ const KEYBOARD_KEYS = [
   'w','x','c','v'
 ];
 
-// waveform + overlay
+// === VISUALISATION DU WAVEFORM ===
+// Canvas pour affichage de la forme d'onde et barres de trim
 let waveformCanvas, overlayCanvas, trimbarsDrawer;
 let mousePos = { x: 0, y: 0 };
 let currentShownBuffer = null;
 let currentShownUrl = null;
 let showWaveformForSound;
 
+// === INITIALISATION DE L'APPLICATION ===
+// Point d'entrée : initialise le contexte audio, lie les modules, charge les presets
 export async function initApp(root) {
   rootEl = root || document;
+  // Crée le contexte Web Audio pour jouer les sons
   ctx = new AudioContext();
 
-  // bind UI nodes from root
+  // Récupère les éléments DOM depuis la racine fournie (Shadow DOM ou document)
   presetSelect = rootEl.querySelector('#presetSelect');
   buttonsContainer = rootEl.querySelector('#buttonsContainer');
   statusEl = rootEl.querySelector('#status');
@@ -68,12 +79,14 @@ export async function initApp(root) {
   lastRecordingCanvas = rootEl.querySelector('#lastRecordingCanvas');
   filePicker = rootEl.querySelector('#filePicker');
 
-  // expose a simple playSound helper globally so choosers can preview sounds
+  // Expose une fonction globale pour que les modules affichage aient accès à la lecture
   window.playSound = (buffer) => {
     try { playSound(ctx, buffer, 0, buffer.duration); } catch (err) { console.warn('global playSound error', err); }
   };
 
   try {
+    // === INITIALISATION DES MODULES ===
+    // Crée le module UI du waveform (canvas + overlay pour trim bars)
     // preset loading will be handled by the `presets` module (initialized below)
     // create waveform UI (hidden until a sound is selected) — initialize the extracted module
     const wfui = initWaveformUI(buttonsContainer);
@@ -89,7 +102,7 @@ export async function initApp(root) {
       currentShownUrl = url;
     };
 
-    // listen for trim changes emitted by waveform-ui and persist them into trimPositions map
+    // Écoute les changements de position des trim bars et les stocke
     window.addEventListener('waveform-trim-changed', (ev) => {
       try {
         const d = ev && ev.detail;
@@ -100,7 +113,7 @@ export async function initApp(root) {
         }
       } catch (err) { console.warn('waveform-trim-changed handler error', err); }
     });
-    // initialize assignment helpers (drag/drop, picker, assign functions)
+    // Initialise le module d'assignation de sons (drag-drop, file picker)
     const assignments = initAssignments({
       decodeFileToBuffer,
       buttonsContainer,
@@ -122,6 +135,7 @@ export async function initApp(root) {
     // expose assignments module globally for backward-compatible wrappers
     window.assignments = assignments;
 
+    // Initialise le module de gestion des presets (charge JSON, crée la grille)
     // initialize presets module and fetch presets (requires assignments + waveform UI available)
     presetsModule = initPresets({
       API_BASE,
@@ -139,7 +153,7 @@ export async function initApp(root) {
     });
     presetsModule.setAssignments(assignments);
     presetsModule.setWaveformUI({ waveformCanvas, trimbarsDrawer });
-    // fetch + normalize + populate select
+    // Récupère et normalise les presets depuis l'API
     const raw = await presetsModule.fetchPresets(PRESETS_URL);
     presets = presetsModule.normalizePresets(raw);
     presetsModule.setPresets(presets);
@@ -147,6 +161,7 @@ export async function initApp(root) {
       throw new Error('Aucun preset utilisable dans la réponse du serveur.');
     }
     fillPresetSelect(presets);
+    // Initialise l'UI pour créer de nouveaux presets (slicer, pitch sampler, local)
     const uiPresets = initUIPresets({
       presetSelect,
       showLocalSoundsChooser,
@@ -168,10 +183,11 @@ export async function initApp(root) {
     // enable select now
     presetSelect.disabled = false;
 
-    // create persistent recording actions UI (visible from start)
+    // Crée la barre d'actions pour enregistrement persistant
     createPersistentRecordingActions();
     if (presetsModule && typeof presetsModule.loadPresetByIndex === 'function') await presetsModule.loadPresetByIndex(0);
 
+    // Écoute le changement de sélection de preset et charge les sons
     // 4) Changement de preset
     // keep native select change handler for programmatic changes
     if (presetSelect) presetSelect.addEventListener('change', async () => {
@@ -182,6 +198,7 @@ export async function initApp(root) {
         if (presetsModule && typeof presetsModule.loadPresetByIndex === 'function') await presetsModule.loadPresetByIndex(idx);
     });
 
+    // Écoute les touches clavier pour déclencher les sons
     // keyboard listener for triggering sounds via assigned keys
     window.addEventListener('keydown', onGlobalKeyDown);
 
@@ -189,6 +206,7 @@ export async function initApp(root) {
     const recordBtn = rootEl.querySelector('#recordBtn');
     const recordStatus = rootEl.querySelector('#recordStatus');
 
+    // Initialise le module d'enregistrement via microphone
     const recorder = initRecorder({
       decodeFileToBuffer,
       lastRecordingCanvas,
@@ -201,6 +219,7 @@ export async function initApp(root) {
       recordStatus
     });
 
+    // Connecte le bouton d'enregistrement à start/stop
     if (recordBtn) {
       recordBtn.onclick = async () => {
         try {
@@ -220,7 +239,8 @@ export async function initApp(root) {
 }
 
 
-// create persistent actions UI under #lastRecordingContainer so buttons are visible from start
+// Crée la barre persistante d'actions pour enregistrement (visible au démarrage)
+// Inclut : Play, Ajouter au sampler, Sauvegarder, Charger
 function createPersistentRecordingActions() {
   const container = rootEl ? rootEl.querySelector('#lastRecordingContainer') : document.getElementById('lastRecordingContainer');
   if (!container) return;
@@ -357,8 +377,9 @@ function createPersistentRecordingActions() {
 }
 
 
-// ---------- UI helpers ----------
+// === FONCTIONS UI SIMPLES ===
 
+// Remplit le dropdown de sélection de presets
 function fillPresetSelect(presets) {
   if (!presetSelect) return;
   presetSelect.innerHTML = '';
@@ -370,23 +391,25 @@ function fillPresetSelect(presets) {
   });
 }
 
+// Affiche un message de statut
 function showStatus(msg) { statusEl.textContent = msg || ''; }
+// Affiche un message d'erreur et efface le statut
 function showError(msg)  { errorEl.textContent = msg || ''; showStatus(''); }
 function resetButtons()  { buttonsContainer.innerHTML = ''; }
 
-// keep resetButtons in sync with currentButtons
+// Efface les boutons et synchronise l'état interne
 function clearButtons() {
   buttonsContainer.innerHTML = '';
   currentButtons = [];
 }
 
-// ---------- Chargement d’un preset ----------
+// === CHARGEMENT DES ENREGISTREMENTS ===
 
-// Show action toolbar next to waveform container for the most recently loaded/recorded sound
+// Affiche la barre d'actions pour le dernier son enregistré ou chargé
+// info: { buffer, file, blob, name }
 function showRecordingActions(anchorContainer, info) {
-  // info: { buffer, file, blob, name }
   if (!anchorContainer) return;
-  // if persistent UI exists, update it instead of creating transient actions
+  // Si l'UI persistant existe, le met à jour au lieu de créer une nouvelle barre
   const persistent = rootEl ? rootEl.querySelector('#persistentRecordingActions') : document.getElementById('persistentRecordingActions');
   const leftPersistent = rootEl ? rootEl.querySelector('#persistentRecordingPlayLeft') : document.getElementById('persistentRecordingPlayLeft');
   if (persistent && leftPersistent) {
@@ -546,7 +569,9 @@ function showRecordingActions(anchorContainer, info) {
   anchorContainer.appendChild(actions);
 }
 
-// Global keyboard handler: map pressed key to the corresponding button (if assigned)
+// === CLAVIER ===
+
+// Gestionnaire global clavier : mappe les touches à des boutons de grille
 function onGlobalKeyDown(e) {
   // ignore repeated events when holding a key
   if (e.repeat) return;
@@ -574,9 +599,9 @@ function onGlobalKeyDown(e) {
   setTimeout(() => btn.classList.remove('keyboard-active'), 140);
 }
 
+// === IMPORT / DRAG & DROP ===
 
-// --- Import / Drag & Drop helpers ---
-
+// Décode un fichier audio en AudioBuffer pour lecture
 async function decodeFileToBuffer(file) {
   const arrayBuffer = await file.arrayBuffer();
   return await ctx.decodeAudioData(arrayBuffer);

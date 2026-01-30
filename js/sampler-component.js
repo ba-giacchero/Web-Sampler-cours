@@ -1,11 +1,17 @@
+// Composant Web personnalisé pour l'application audio sampler
+// Encapsule l'interface complète (canvas, boutons, preset) dans une Shadow DOM
 import { initApp } from './main.js';
 
+// Classe Web Component : crée un élément <audio-sampler> réutilisable
 class AudioSampler extends HTMLElement {
+  // Initialise le composant et attache une Shadow DOM (isolée du DOM principal)
   constructor() {
     super();
     this._shadow = this.attachShadow({ mode: 'closed' });
   }
 
+  // Hook du cycle de vie : appelé quand le composant est inséré dans le DOM
+  // Construit l'interface HTML et CSS, puis initialise l'application
   connectedCallback() {
     // template: markup + inlined styles (copied from css/styles.css)
     this._shadow.innerHTML = `
@@ -331,13 +337,13 @@ body { background-color: transparent; }
       </div>
     `;
 
-    // initialize the app inside the shadow root
-    // initApp expects a root-like object with querySelector; ShadowRoot fits that role
+    // Lance l'application principale en passant la Shadow DOM comme conteneur
+    // initApp s'attend à un objet qui supporte querySelector (ShadowRoot fonctionne)
     try {
       initApp(this._shadow);
     } catch (err) {
-      // initialization errors should not break host page
-      // create a visible error message inside the shadow root
+      // Capture les erreurs d'initialisation pour ne pas casser la page hôte
+      // Affiche le message d'erreur dans la Shadow DOM
       const errEl = this._shadow.querySelector('#error');
       if (errEl) errEl.textContent = 'Erreur initialisation: ' + (err && err.message ? err.message : String(err));
       console.error('AudioSampler init error', err);
@@ -345,6 +351,8 @@ body { background-color: transparent; }
   }
 }
 
+// Enregistre le composant Web : permet d'utiliser <audio-sampler> dans le HTML
 customElements.define('audio-sampler', AudioSampler);
 
+// Exporte pour utilisation comme module ES6
 export default AudioSampler;

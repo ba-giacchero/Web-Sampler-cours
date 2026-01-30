@@ -1,8 +1,12 @@
-// Minimal IndexedDB helper for storing recorded audio blobs
+// indexeddb.js
+// Module de stockage persistant : sauvegarde les enregistrements audio dans IndexedDB
+
+// Configuration de la base de données
 const DB_NAME = 'websampler-db';
 const DB_VERSION = 1;
 const STORE_NAME = 'recordings';
 
+// Ouvre la base de données IndexedDB, crée le store s'il n'existe pas
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -17,11 +21,13 @@ function openDB() {
   });
 }
 
+// Sauvegarde un enregistrement audio (blob) avec métadonnées (nom, date, taille)
 async function saveRecording(blob, name) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const store = tx.objectStore(STORE_NAME);
+    // Crée un objet enregistrement avec blob, nom, timestamp et taille
     const entry = { name: name || `recording-${Date.now()}`, blob, created: Date.now(), size: blob.size, type: blob.type };
     const req = store.add(entry);
     req.onsuccess = () => resolve(req.result);
@@ -29,6 +35,7 @@ async function saveRecording(blob, name) {
   });
 }
 
+// Récupère la liste de tous les enregistrements sauvegardés
 async function listRecordings() {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -40,6 +47,7 @@ async function listRecordings() {
   });
 }
 
+// Récupère un enregistrement spécifique par son ID
 async function getRecording(id) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -51,6 +59,7 @@ async function getRecording(id) {
   });
 }
 
+// Supprime un enregistrement par son ID
 async function deleteRecording(id) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -62,4 +71,5 @@ async function deleteRecording(id) {
   });
 }
 
+// Exporte les fonctions d'accès au stockage persistant
 export { saveRecording, listRecordings, getRecording, deleteRecording };
