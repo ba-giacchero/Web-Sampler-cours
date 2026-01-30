@@ -60,10 +60,14 @@ export function drawWaveformBase(buffer, canvas, opts = {}) {
   ctx2.stroke();
 }
 
+// Rendu d'une waveform complète avec style par défaut
+// Utilisé pour afficher les sons dans la UI principale
 export function drawWaveform(buffer, canvas, overlayCanvas) {
   drawWaveformBase(buffer, canvas, { height: 120, background: '#fafafa', strokeStyle: '#007acc', lineWidth: 1, syncOverlay: !!overlayCanvas, overlayCanvas, xOffsetScaleByDpr: false, scaleLineWidthByDpr: false });
 }
 
+// Rendu d'une mini waveform avec style compact
+// Utilisé pour l'aperçu des sons dans les listes (plus petit, haute densité)
 export function drawMiniWaveform(buffer, canvas) {
   drawWaveformBase(buffer, canvas, { height: 80, background: '#ffffff', strokeStyle: '#0b2a3a', lineWidth: 1, syncOverlay: false, xOffsetScaleByDpr: true, scaleLineWidthByDpr: true });
 }
