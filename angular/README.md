@@ -1,15 +1,3 @@
-Angular presets demo
-
-Instructions:
-
-```
-cd angular
-npm install
-npx ng serve
-```
-
-The app will call the presets API at `http://localhost:3000/api/presets`.
-
 Angular Presets Admin (Angular)
 ================================
 

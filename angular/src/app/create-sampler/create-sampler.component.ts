@@ -16,7 +16,9 @@ export class CreateSamplerComponent {
   loading = false;
 
   constructor(private svc: PresetsService, private router: Router) {}
-
+    // gestion de la sélection de fichiers, 
+    // on verifie qu'ils sont bien audio avant de les ajouter
+    //et on limite à 16 fichiers max
   onFileSelected(event: Event) {
     const input = event.target as HTMLInputElement;
     if (!input.files) { return; }
@@ -33,17 +35,17 @@ export class CreateSamplerComponent {
       alert('Maximum 16 fichiers audio par preset. Les fichiers supplémentaires ont été ignorés.');
     }
   }
-
+  // gestion du drag over pour le drop de fichiers audio
   onDragOver(event: DragEvent) {
     event.preventDefault();
     this.isDragOver = true;
   }
-
+  // gestion du drag leave pour le drop de fichiers audio
   onDragLeave(event: DragEvent) {
     event.preventDefault();
     this.isDragOver = false;
   }
-
+  // gestion du drop de fichiers, ajout des fichiers audio avec la même logique que la sélection
   onDrop(event: DragEvent) {
     event.preventDefault();
     this.isDragOver = false;
@@ -55,6 +57,7 @@ export class CreateSamplerComponent {
         if (f && f.type.startsWith('audio/')) droppedFiles.push(f);
       }
     }
+    // gestion du drop de fichiers audio qui limite à 16 fichiers max
     if (!droppedFiles.length) { return; }
     const { files, truncated } = appendAudioFiles(this.files, droppedFiles, 16);
     this.files = files;
@@ -62,12 +65,12 @@ export class CreateSamplerComponent {
       alert('Maximum 16 fichiers audio par preset. Les fichiers supplémentaires ont été ignorés.');
     }
   }
-
+  //delete d'un fichier sélectionné
   removeFile(index: number) {
     this.files.splice(index, 1);
     this.files = [...this.files];
   }
-
+  // création du preset
   createPreset() {
     // on recupère et valide le nom
     const rawName = (this.name || '').trim();
@@ -115,13 +118,14 @@ export class CreateSamplerComponent {
             isFactoryPresets: false,
             samples: []
           };
-
+          // on crée le preset vide
           this.svc.create(body).subscribe({
             next: () => {
               alert('Preset vide créé.');
               this.loading = false;
               this.router.navigate(['/']);
             },
+            //gestion des erreurs
             error: (e) => {
               this.loading = false;
               alert('Erreur lors de la création: ' + (e?.error?.error || e?.message || e));
@@ -137,7 +141,7 @@ export class CreateSamplerComponent {
             samples = samples.slice(0, 16);
             alert('Maximum 16 sons par preset. Les URLs supplémentaires ont été ignorées.');
           }
-
+          // on construit le preset complet
           const body: Preset = {
             name,
             type: 'Custom',
