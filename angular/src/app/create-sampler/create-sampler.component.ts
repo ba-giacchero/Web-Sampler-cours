@@ -111,14 +111,17 @@ export class CreateSamplerComponent {
         }
 
         // Cas 1: vide
+        // ni fichiers ni URLs
+        // juste un preset vide sans samples
         if (!hasFiles && urlSamples.length === 0) {
+          // on construit le preset vide
           const body: Preset = {
             name,
             type: 'Empty',
             isFactoryPresets: false,
             samples: []
           };
-          // on crée le preset vide
+          // on crée le preset vide sur le back end
           this.svc.create(body).subscribe({
             next: () => {
               alert('Preset vide créé.');
@@ -135,6 +138,9 @@ export class CreateSamplerComponent {
         }
 
         // Cas 2: URL seulement
+        // on prend les URLs fournies qui sont celles deja presente sur le back end
+        // et on crée le preset avec ces URLs
+        // on limite à 16 sons max
         if (!hasFiles) {
           let samples = urlSamples;
           if (samples.length > 16) {
@@ -148,13 +154,14 @@ export class CreateSamplerComponent {
             isFactoryPresets: false,
             samples
           };
-
+          // on crée le preset avec les URLs seulement
           this.svc.create(body).subscribe({
             next: () => {
               alert('Preset créé avec les URLs fournies.');
               this.loading = false;
               this.router.navigate(['/']);
             },
+            //gestion des erreurs
             error: (e) => {
               this.loading = false;
               alert('Erreur lors de la création: ' + (e?.error?.error || e?.message || e));
@@ -164,6 +171,9 @@ export class CreateSamplerComponent {
         }
 
         // Cas 3: on a des fichiers (avec potentiellement des URL en plus)
+        // on upload les fichiers audio dans un dossier portant le nom du preset
+        // puis on crée le preset avec les URLs résultantes de l'upload + les URLs fournies
+        // dans la limite de 16 sons max
         this.svc.upload(name, this.files).subscribe({
           next: (uploadRes) => {
             const fileSamples = buildSamplesFromUpload(name, uploadRes);
@@ -172,20 +182,21 @@ export class CreateSamplerComponent {
               allSamples = allSamples.slice(0, 16);
               alert('Maximum 16 sons par preset. Certains sons supplémentaires ont été ignorés.');
             }
-
+            // on construit le preset complet
             const body: Preset = {
               name,
               type: 'Custom',
               isFactoryPresets: false,
               samples: allSamples
             };
-
+            // on crée le preset avec les fichiers audio et les URLs fournies
             this.svc.create(body).subscribe({
               next: () => {
                 alert('Preset créé avec les fichiers audio et les URLs fournies.');
                 this.loading = false;
                 this.router.navigate(['/']);
               },
+              //gestion des erreurs
               error: (e) => {
                 this.loading = false;
                 alert('Erreur lors de la création du preset: ' + (e?.error?.error || e?.message || e));
